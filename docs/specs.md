@@ -451,7 +451,7 @@ created_at timestamptz not null
 id uuid primary key
 person_id uuid references people(id)
 reference_image_id uuid references person_reference_images(id)
-embedding vector(512)
+embedding vector(128)
 model_name text not null
 model_version text not null
 quality_score float
@@ -491,7 +491,7 @@ created_at timestamptz not null
 id uuid primary key
 article_image_id uuid references article_images(id)
 bbox jsonb not null
-embedding vector(512)
+embedding vector(128)
 quality_score float
 model_name text not null
 model_version text not null

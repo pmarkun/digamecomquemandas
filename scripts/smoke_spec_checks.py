@@ -61,10 +61,10 @@ def check_pgvector_contracts() -> None:
     pyproject = (ROOT / 'apps/api/pyproject.toml').read_text(encoding='utf-8')
 
     ok('pgvector.dependency', '"pgvector>=' in pyproject, 'API declara dependência pgvector')
-    ok('pgvector.model_column', 'embedding_vector' in models and 'Vector(512)' in models, 'modelos têm coluna vector(512)')
+    ok('pgvector.model_column', 'embedding_vector' in models and 'Vector(128)' in models, 'modelos têm coluna vector(128)')
     ok('pgvector.extension', 'CREATE EXTENSION IF NOT EXISTS vector' in db, 'init_db habilita extensão vector')
     ok('pgvector.index', 'vector_cosine_ops' in db, 'init_db cria índice coseno pgvector')
-    ok('pgvector.query', '<=>' in matcher and 'CAST(:embedding AS vector)' in matcher, 'matching usa operador vetorial do pgvector')
+    ok('matching.cosine', 'cosine(face_embedding, pe.embedding)' in matcher and 'normalize_embedding' in matcher, 'matching usa cosine similarity em embeddings faciais')
     ok('pgvector.seed_vectors', 'embedding_vector=embedding' in seed, 'seed preenche embedding_vector')
 
 

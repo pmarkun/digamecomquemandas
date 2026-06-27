@@ -97,5 +97,5 @@ make seed
 ## Limitações atuais
 
 - Pipeline usa detector/embedding determinístico por imagem, sem InsightFace real ainda.
-- Embeddings são persistidos em coluna `vector(512)` no PostgreSQL/pgvector e também em JSON para fallback de testes.
+- Embeddings faciais são persistidos em coluna `vector(128)` no PostgreSQL/pgvector e também em JSON para fallback de testes.
 - Worker é modo demo inicial (sem fila/broker real).

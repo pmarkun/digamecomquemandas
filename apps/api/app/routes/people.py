@@ -36,7 +36,7 @@ def list_people(query: str | None = None, session: Session = Depends(get_session
     stmt = select(Person)
     if query:
         q = f"%{query}%"
-        stmt = stmt.where(Person.name.ilike(q))
+        stmt = stmt.where(Person.name.ilike(q) | Person.display_name.ilike(q) | Person.slug.ilike(q))
     people = session.exec(stmt).all()
     return [_to_people_out(item) for item in people]
 

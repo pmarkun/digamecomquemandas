@@ -53,20 +53,39 @@ def init_db() -> None:
 
     if engine.dialect.name == "postgresql":
         with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE faceembedding ADD COLUMN IF NOT EXISTS embedding_vector vector(512)"))
-            connection.execute(text("ALTER TABLE detectedface ADD COLUMN IF NOT EXISTS embedding_vector vector(512)"))
+            connection.execute(text("DROP INDEX IF EXISTS idx_faceembedding_embedding_vector_cosine"))
+            connection.execute(text("ALTER TABLE faceembedding ADD COLUMN IF NOT EXISTS embedding_vector vector(128)"))
+            connection.execute(text("ALTER TABLE detectedface ADD COLUMN IF NOT EXISTS embedding_vector vector(128)"))
+            connection.execute(
+                text(
+                    "ALTER TABLE faceembedding "
+                    "ALTER COLUMN embedding_vector TYPE vector(128) "
+                    "USING CASE "
+                    "WHEN embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128 "
+                    "THEN embedding::text::vector ELSE NULL END"
+                )
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE detectedface "
+                    "ALTER COLUMN embedding_vector TYPE vector(128) "
+                    "USING CASE "
+                    "WHEN embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128 "
+                    "THEN embedding::text::vector ELSE NULL END"
+                )
+            )
             connection.execute(
                 text(
                     "UPDATE faceembedding "
                     "SET embedding_vector = embedding::text::vector "
-                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL"
+                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128"
                 )
             )
             connection.execute(
                 text(
                     "UPDATE detectedface "
                     "SET embedding_vector = embedding::text::vector "
-                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL"
+                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128"
                 )
             )
             connection.execute(

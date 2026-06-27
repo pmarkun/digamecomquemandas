@@ -24,10 +24,11 @@ from ..schemas import LoginIn, LoginOut, MatchReassignIn, MatchReviewIn, PersonC
 from ..services.audit import write_action
 from ..services.image_fetcher import fetch_image
 from ..services.match import embedding_from_image
+from .extension import promote_face_reference, _upsert_manual_match
 
 router = APIRouter(prefix="/admin")
 
-ALLOWED_MATCH_STATUS: Final = {"APPROVED", "REJECTED", "HIDDEN_OPTOUT", "AUTO", "AUTO_APPROVED"}
+ALLOWED_MATCH_STATUS: Final = {"APPROVED", "APPROVED_MANUAL", "REJECTED", "HIDDEN_OPTOUT", "AUTO", "AUTO_APPROVED"}
 ALLOWED_SUGGESTION_STATUS: Final = {
     "APPROVED",
     "REJECTED",
@@ -271,9 +272,14 @@ def reassign_match(match_id: str, payload: MatchReassignIn, session: Session = D
 
     old_person_id = str(match.person_id)
     match.person_id = person.id
-    match.status = payload.status
+    match.score = 1.0
+    match.distance = 0.0
+    match.status = "APPROVED_MANUAL"
     match.reviewed_at = datetime.now(timezone.utc)
     session.add(match)
+    face = session.get(DetectedFace, match.detected_face_id)
+    if face:
+        promote_face_reference(session, face, person)
     write_action(
         session,
         actor_type="admin",
@@ -281,7 +287,7 @@ def reassign_match(match_id: str, payload: MatchReassignIn, session: Session = D
         action="reassign_match",
         entity_type="face_match",
         entity_id=match.id,
-        metadata={"old_person_id": old_person_id, "new_person_id": str(person.id), "status": payload.status},
+        metadata={"old_person_id": old_person_id, "new_person_id": str(person.id), "status": match.status},
     )
     session.commit()
     return {"ok": True, "person_id": str(person.id), "status": match.status}
@@ -339,14 +345,8 @@ def review_suggestion(
                 )
                 session.add(person)
                 session.flush()
-        session.add(
-            FaceMatch(
-                detected_face_id=face.id,
-                person_id=person.id,
-                score=0.99,
-                status="APPROVED",
-            )
-        )
+        _upsert_manual_match(session, face, person)
+        promote_face_reference(session, face, person)
 
     write_action(
         session,

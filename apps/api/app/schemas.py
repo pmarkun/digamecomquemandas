@@ -11,6 +11,8 @@ class DetectedFaceIn(BaseModel):
     w: float
     h: float
     score: float | None = None
+    embedding: list[float] | None = None
+    embedding_model: str | None = None
 
 
 class AnalyzeImage(BaseModel):

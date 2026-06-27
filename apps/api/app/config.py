@@ -18,9 +18,10 @@ class Settings(BaseSettings):
     admin_password: str = "admin"
 
     face_model_name: str = "buffalo_l"
-    face_match_threshold: float = 0.94
-    face_display_threshold: float = 0.97
-    face_auto_approve_threshold: float = 0.995
+    face_match_threshold: float = 0.78
+    face_display_threshold: float = 0.78
+    face_auto_approve_threshold: float = 0.88
+    face_auto_approve_gap: float = 0.06
     max_matches_per_face: int = 3
 
     store_original_images: bool = False

@@ -16,10 +16,11 @@ from ..models import (
     FaceMatch,
     FaceSuggestion,
     Person,
+    PersonReferenceImage,
 )
 from ..services.face_detector import detect_faces
 from ..services.image_fetcher import fetch_image
-from ..services.match import embedding_from_image, match_candidates
+from ..services.match import match_candidates, normalize_embedding
 from ..services.privacy import hash_sha256, ensure_domain
 from ..services.audit import write_action
 from ..schemas import (
@@ -76,6 +77,8 @@ def _clamp_face(face, width: int | None, height: int | None) -> dict | None:
     return {
         "bbox": {"x": x, "y": y, "w": w, "h": h},
         "quality_score": face.score if face.score is not None and isfinite(face.score) else None,
+        "embedding": normalize_embedding(face.embedding),
+        "embedding_model": face.embedding_model or "face-api.js",
     }
 
 
@@ -127,6 +130,94 @@ def _serialize_face(session: Session, detected: DetectedFace, person_map: dict[s
         face_id=str(detected.id),
         bbox=BBox(**detected.bbox),
         matches=faces_matches,
+    )
+
+
+def _is_active_person(person: Person | None) -> bool:
+    return bool(person and str(person.status) not in {"OPTOUT_LIMITED", "REMOVED"})
+
+
+def _should_auto_approve(candidates: list[dict]) -> bool:
+    if not candidates:
+        return False
+    settings = get_settings()
+    top = candidates[0]
+    second_score = candidates[1]["score"] if len(candidates) > 1 else 0.0
+    return (
+        top["score"] >= settings.face_auto_approve_threshold
+        and (top["score"] - second_score) >= settings.face_auto_approve_gap
+    )
+
+
+def _upsert_manual_match(session: Session, face: DetectedFace, person: Person) -> None:
+    existing = session.exec(
+        select(FaceMatch).where(
+            FaceMatch.detected_face_id == face.id,
+            FaceMatch.person_id == person.id,
+        )
+    ).first()
+    if existing:
+        existing.score = 1.0
+        existing.distance = 0.0
+        existing.status = "APPROVED_MANUAL"
+        session.add(existing)
+        return
+
+    session.add(
+        FaceMatch(
+            detected_face_id=face.id,
+            person_id=person.id,
+            score=1.0,
+            distance=0.0,
+            status="APPROVED_MANUAL",
+        )
+    )
+
+
+def promote_face_reference(session: Session, face: DetectedFace, person: Person) -> None:
+    embedding = normalize_embedding(face.embedding)
+    if embedding is None:
+        return
+
+    image = session.get(ArticleImage, face.article_image_id)
+    source_url = f"{image.image_url if image else 'detected-face'}#face={face.id}"
+    existing_ref = session.exec(
+        select(PersonReferenceImage).where(
+            PersonReferenceImage.person_id == person.id,
+            PersonReferenceImage.source_url == source_url,
+        )
+    ).first()
+    if existing_ref:
+        existing_embedding = session.exec(
+            select(FaceEmbedding).where(FaceEmbedding.reference_image_id == existing_ref.id)
+        ).first()
+        if existing_embedding:
+            existing_embedding.embedding = embedding
+            existing_embedding.embedding_vector = embedding
+            existing_embedding.model_name = face.model_name
+            existing_embedding.model_version = face.model_version
+            existing_embedding.quality_score = face.quality_score
+            session.add(existing_embedding)
+        return
+
+    ref = PersonReferenceImage(
+        person_id=person.id,
+        source_url=source_url,
+        sha256=image.sha256 if image else None,
+        phash=image.phash if image else None,
+    )
+    session.add(ref)
+    session.flush()
+    session.add(
+        FaceEmbedding(
+            person_id=person.id,
+            reference_image_id=ref.id,
+            embedding=embedding,
+            embedding_vector=embedding,
+            model_name=face.model_name,
+            model_version=face.model_version,
+            quality_score=face.quality_score,
+        )
     )
 
 
@@ -183,18 +274,22 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
                 warnings.append(f"Imagem não baixada; usando metadados enviados: {item.image_url}")
 
             for face in _faces_for_image(item, image):
-                embed = embedding_from_image(item.image_url, fetched.content)
+                embed = face.get("embedding")
                 detected = DetectedFace(
                     article_image_id=image.id,
                     bbox=face["bbox"],
                     embedding=embed,
                     embedding_vector=embed,
                     quality_score=face["quality_score"],
+                    model_name=face.get("embedding_model") or "face-api.js",
+                    model_version="0.1",
                 )
                 session.add(detected)
                 session.flush()
 
-                for item_match in match_candidates(session, embed, person_embeddings):
+                candidate_matches = match_candidates(session, embed, person_embeddings) if embed else []
+                auto_approve = _should_auto_approve(candidate_matches)
+                for index, item_match in enumerate(candidate_matches):
                     person_key = str(item_match["person_id"])
                     person_obj = person_map.get(person_key)
                     if person_obj is None:
@@ -202,7 +297,7 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
                         if person_obj:
                             person_map[person_key] = person_obj
 
-                    if person_obj and str(person_obj.status) in {"OPTOUT_LIMITED", "REMOVED"}:
+                    if not _is_active_person(person_obj):
                         continue
 
                     m = FaceMatch(
@@ -210,7 +305,7 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
                         person_id=item_match["person_id"],
                         score=item_match["score"],
                         distance=item_match["distance"],
-                        status=item_match["status"],
+                        status="AUTO_APPROVED" if auto_approve and index == 0 else "AUTO",
                     )
                     session.add(m)
 

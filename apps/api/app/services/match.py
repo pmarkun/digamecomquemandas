@@ -19,7 +19,7 @@ class BBoxLike:
     h: int
 
 
-DIMENSION = 512
+DIMENSION = 128
 
 
 def embedding_from_seed(seed: str, dim: int = DIMENSION) -> List[float]:
@@ -41,6 +41,24 @@ def embedding_from_image(image_url: str, content: bytes | None, dim: int = DIMEN
     return embedding_from_seed(image_url, dim=dim)
 
 
+def normalize_embedding(values: list[float] | None, dim: int = DIMENSION) -> list[float] | None:
+    if values is None or len(values) != dim:
+        return None
+    cleaned: list[float] = []
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number or number in {float("inf"), float("-inf")}:
+            return None
+        cleaned.append(number)
+    norm = sqrt(sum(v * v for v in cleaned))
+    if not norm:
+        return None
+    return [v / norm for v in cleaned]
+
+
 def cosine(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
@@ -58,9 +76,7 @@ def _embedding_literal(face_embedding: list[float]) -> str:
 def _status_for_score(score: float) -> str:
     settings = get_settings()
     if score >= settings.face_auto_approve_threshold:
-        return "AUTO_APPROVED"
-    if score >= settings.face_display_threshold:
-        return "APPROVED"
+        return "AUTO"
     return "AUTO"
 
 
@@ -105,6 +121,8 @@ def _match_candidates_python(face_embedding: list[float], person_embeddings: lis
 
     scored = []
     for pe in person_embeddings:
+        if len(pe.embedding or []) != len(face_embedding):
+            continue
         score = cosine(face_embedding, pe.embedding)
         if score < threshold:
             continue
@@ -122,8 +140,6 @@ def _match_candidates_python(face_embedding: list[float], person_embeddings: lis
 
 
 def match_candidates(session: Session, face_embedding: list[float], person_embeddings: list[FaceEmbedding]) -> list[dict]:
-    if session.bind and session.bind.dialect.name == "postgresql":
-        return _match_candidates_pgvector(session, face_embedding)
     return _match_candidates_python(face_embedding, person_embeddings)
 
 
