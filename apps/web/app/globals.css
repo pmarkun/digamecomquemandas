@@ -20,6 +20,10 @@ textarea {
   font: inherit;
 }
 
+select {
+  font: inherit;
+}
+
 button {
   cursor: pointer;
 }
@@ -156,6 +160,22 @@ button {
   min-height: 40px;
 }
 
+.input.full,
+.wide-input {
+  width: 100%;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.wide-input {
+  grid-column: 1 / -1;
+  min-height: 92px;
+}
+
 .button {
   border: 1px solid #191919;
   background: #191919;
@@ -232,11 +252,52 @@ button {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+.image-grid,
+.match-grid {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.image-grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+.thumb-card,
+.match-card {
+  border: 1px solid #d8d0c2;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 0.65rem;
+}
+
+.thumb-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  margin-bottom: 0.5rem;
+}
+
+.match-card {
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.match-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid #2b2b2b;
+}
+
 @media (max-width: 840px) {
   .home-hero,
   .home-grid,
   .admin-sections,
-  .dashboard-grid {
+  .dashboard-grid,
+  .form-grid,
+  .match-card {
     grid-template-columns: 1fr;
   }
 

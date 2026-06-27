@@ -13,12 +13,14 @@ from ..models import (
     AuditLog,
     FaceMatch,
     FaceSuggestion,
+    Article,
+    ArticleImage,
     Person,
     PersonReferenceImage,
     DetectedFace,
     FaceEmbedding,
 )
-from ..schemas import LoginIn, LoginOut, MatchReviewIn, PersonCreate, ReferenceImageIn, ReferenceImageOut
+from ..schemas import LoginIn, LoginOut, MatchReassignIn, MatchReviewIn, PersonCreate, PersonUpdate, ReferenceImageIn, ReferenceImageOut
 from ..services.audit import write_action
 from ..services.image_fetcher import fetch_image
 from ..services.match import embedding_from_image
@@ -63,19 +65,31 @@ def login(payload: LoginIn):
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
+def _person_payload(item: Person) -> dict:
+    return {
+        "id": str(item.id),
+        "name": item.name,
+        "display_name": item.display_name,
+        "slug": item.slug,
+        "category": item.category,
+        "description": item.description,
+        "public_office": item.public_office,
+        "source_urls": item.source_urls,
+        "status": item.status,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
 @router.get("/people")
-def list_people(session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+def list_people(query: str | None = None, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+    stmt = select(Person)
+    if query:
+        q = f"%{query}%"
+        stmt = stmt.where(Person.name.ilike(q) | Person.display_name.ilike(q) | Person.slug.ilike(q))
     return [
-        {
-            "id": str(item.id),
-            "name": item.name,
-            "display_name": item.display_name,
-            "slug": item.slug,
-            "category": item.category,
-            "status": item.status,
-            "created_at": item.created_at,
-        }
-        for item in session.exec(select(Person)).all()
+        _person_payload(item)
+        for item in session.exec(stmt).all()
     ]
 
 
@@ -103,6 +117,84 @@ def create_person(payload: PersonCreate, session: Session = Depends(get_session)
     )
     session.commit()
     return {"id": str(person.id)}
+
+
+@router.get("/people/{person_id}")
+def get_admin_person(person_id: str, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+    person = session.get(Person, _as_uuid(person_id))
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    reference_images = session.exec(
+        select(PersonReferenceImage).where(PersonReferenceImage.person_id == person.id)
+    ).all()
+    matches = session.exec(select(FaceMatch).where(FaceMatch.person_id == person.id)).all()
+
+    match_payload = []
+    for match in matches:
+        face = session.get(DetectedFace, match.detected_face_id)
+        image = session.get(ArticleImage, face.article_image_id) if face else None
+        article = session.get(Article, image.article_id) if image else None
+        match_payload.append(
+            {
+                "id": str(match.id),
+                "detected_face_id": str(match.detected_face_id),
+                "person_id": str(match.person_id),
+                "score": match.score,
+                "status": match.status,
+                "bbox": face.bbox if face else None,
+                "image_id": str(image.id) if image else None,
+                "image_url": image.image_url if image else None,
+                "article_id": str(article.id) if article else None,
+                "article_title": article.title if article else None,
+                "article_url": article.url if article else None,
+                "captured_at": article.captured_at if article else None,
+            }
+        )
+
+    return {
+        "person": _person_payload(person),
+        "reference_images": [
+            {
+                "id": str(ref.id),
+                "source_url": ref.source_url,
+                "sha256": ref.sha256,
+                "phash": ref.phash,
+                "status": ref.status,
+                "created_at": ref.created_at,
+            }
+            for ref in reference_images
+        ],
+        "matches": match_payload,
+    }
+
+
+@router.post("/people/{person_id}/update")
+def update_person(person_id: str, payload: PersonUpdate, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+    person = session.get(Person, _as_uuid(person_id))
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    person.name = payload.name
+    person.display_name = payload.display_name
+    person.slug = payload.slug
+    person.category = payload.category
+    person.description = payload.description
+    person.public_office = payload.public_office
+    person.status = payload.status
+    person.source_urls = payload.source_urls
+    person.updated_at = datetime.now(timezone.utc)
+    session.add(person)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="update_person",
+        entity_type="person",
+        entity_id=person.id,
+    )
+    session.commit()
+    return {"ok": True, "person": _person_payload(person)}
 
 
 @router.post("/people/{person_id}/reference-images")
@@ -166,6 +258,33 @@ def review_match(match_id: str, payload: MatchReviewIn, session: Session = Depen
     )
     session.commit()
     return {"ok": True, "status": match.status}
+
+
+@router.post("/matches/{match_id}/reassign")
+def reassign_match(match_id: str, payload: MatchReassignIn, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+    match = session.get(FaceMatch, _as_uuid(match_id))
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+    person = session.get(Person, payload.person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    old_person_id = str(match.person_id)
+    match.person_id = person.id
+    match.status = payload.status
+    match.reviewed_at = datetime.now(timezone.utc)
+    session.add(match)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="reassign_match",
+        entity_type="face_match",
+        entity_id=match.id,
+        metadata={"old_person_id": old_person_id, "new_person_id": str(person.id), "status": payload.status},
+    )
+    session.commit()
+    return {"ok": True, "person_id": str(person.id), "status": match.status}
 
 
 @router.post("/suggestions/{suggestion_id}/review")

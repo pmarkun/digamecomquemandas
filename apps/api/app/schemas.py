@@ -62,6 +62,17 @@ class PersonCreate(BaseModel):
     source_urls: list[str] = Field(default_factory=list)
 
 
+class PersonUpdate(BaseModel):
+    name: str
+    display_name: str
+    slug: str
+    category: str
+    description: str | None = None
+    public_office: str | None = None
+    status: str
+    source_urls: list[str] = Field(default_factory=list)
+
+
 class PersonOut(BaseModel):
     id: str
     slug: str
@@ -88,6 +99,11 @@ class ReferenceImageOut(BaseModel):
 
 class MatchReviewIn(BaseModel):
     status: str
+
+
+class MatchReassignIn(BaseModel):
+    person_id: UUID
+    status: str = "APPROVED"
 
 
 class ContestRequest(BaseModel):

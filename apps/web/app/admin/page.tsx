@@ -6,7 +6,9 @@ import { api } from '@/lib/api';
 type Person = {
   id: string;
   name: string;
+  display_name?: string;
   slug: string;
+  category?: string;
   status: string;
 };
 
@@ -68,6 +70,7 @@ export default function AdminPage() {
   const [audits, setAudits] = useState<AuditLog[]>([]);
   const [allowedDomains, setAllowedDomains] = useState<AllowedDomain[]>([]);
   const [newDomain, setNewDomain] = useState('');
+  const [personQuery, setPersonQuery] = useState('');
 
   const headersFor = (authToken = token) => ({
     Authorization: `Bearer ${authToken}`,
@@ -96,6 +99,7 @@ export default function AdminPage() {
     try {
       const out = await api.post<{ token: string }>(`/admin/login`, { email, password });
       setToken(out.token);
+      window.localStorage.setItem('digaMeAdminToken', out.token);
       setLogged(true);
       setFeedback('Login ok.');
       await loadProtected(out.token);
@@ -104,6 +108,11 @@ export default function AdminPage() {
       setLogged(false);
     }
   };
+
+  const filteredPeople = people.filter((item) => {
+    const text = `${item.name} ${item.display_name || ''} ${item.slug}`.toLowerCase();
+    return text.includes(personQuery.trim().toLowerCase());
+  });
 
   const addPerson = async (event: FormEvent) => {
     event.preventDefault();
@@ -229,12 +238,24 @@ export default function AdminPage() {
 
           <section className="panel">
           <h2>Pessoas</h2>
+          <input
+            className="input full"
+            list="admin-people"
+            value={personQuery}
+            onChange={(event) => setPersonQuery(event.target.value)}
+            placeholder="Buscar por nome, slug ou cargo"
+          />
+          <datalist id="admin-people">
+            {people.map((item) => (
+              <option key={item.id} value={item.name} />
+            ))}
+          </datalist>
           <table className="table">
             <thead><tr><th>Nome</th><th>Slug</th><th>Status</th><th>Ação</th></tr></thead>
             <tbody>
-            {people.map((item) => (
+            {filteredPeople.map((item) => (
               <tr key={item.id}>
-                <td>{item.name}</td>
+                <td><a href={`/admin/pessoas/${item.id}`}>{item.name}</a></td>
                 <td>{item.slug}</td>
                 <td><span className="badge">{item.status}</span></td>
                 <td><button className="button secondary" type="button" onClick={() => optoutPerson(item.id)}>Opt-out</button></td>
