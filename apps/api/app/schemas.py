@@ -5,10 +5,19 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class DetectedFaceIn(BaseModel):
+    x: float
+    y: float
+    w: float
+    h: float
+    score: float | None = None
+
+
 class AnalyzeImage(BaseModel):
     image_url: str
     width: int | None = None
     height: int | None = None
+    faces: list[DetectedFaceIn] | None = None
 
 
 class AnalyzePageRequest(BaseModel):

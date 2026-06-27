@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 from uuid import UUID
+from math import isfinite
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, and_, select
@@ -55,6 +56,41 @@ def _ensure_allowed_domain(session: Session, domain: str) -> bool:
 
 def _is_allowed(session: Session, page_url: str) -> bool:
     return _ensure_allowed_domain(session, urlparse(page_url).netloc)
+
+
+def _clamp_face(face, width: int | None, height: int | None) -> dict | None:
+    image_width = width or 0
+    image_height = height or 0
+    values = [face.x, face.y, face.w, face.h]
+    if not all(isfinite(value) for value in values):
+        return None
+
+    x = max(0.0, min(float(face.x), float(image_width)))
+    y = max(0.0, min(float(face.y), float(image_height)))
+    w = max(0.0, min(float(face.w), float(image_width) - x))
+    h = max(0.0, min(float(face.h), float(image_height) - y))
+
+    if w < 24 or h < 24:
+        return None
+
+    return {
+        "bbox": {"x": x, "y": y, "w": w, "h": h},
+        "quality_score": face.score if face.score is not None and isfinite(face.score) else None,
+    }
+
+
+def _faces_for_image(item, image: ArticleImage) -> list[dict]:
+    if item.faces is not None:
+        return [
+            normalized
+            for face in item.faces
+            if (normalized := _clamp_face(face, image.width, image.height)) is not None
+        ]
+
+    return [
+        {"bbox": vars(face.bbox), "quality_score": None}
+        for face in detect_faces(image.width, image.height)
+    ]
 
 
 def _serialize_face(session: Session, detected: DetectedFace, person_map: dict[str, Person]) -> FaceOut:
@@ -146,13 +182,14 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
             if not fetched.ok:
                 warnings.append(f"Imagem não baixada; usando metadados enviados: {item.image_url}")
 
-            for face in detect_faces(image.width, image.height):
+            for face in _faces_for_image(item, image):
                 embed = embedding_from_image(item.image_url, fetched.content)
                 detected = DetectedFace(
                     article_image_id=image.id,
-                    bbox=vars(face.bbox),
+                    bbox=face["bbox"],
                     embedding=embed,
                     embedding_vector=embed,
+                    quality_score=face["quality_score"],
                 )
                 session.add(detected)
                 session.flush()

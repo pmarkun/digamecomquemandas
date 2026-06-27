@@ -1,4 +1,6 @@
 // @ts-nocheck
+import * as faceapi from 'face-api.js';
+
 const ALLOWLIST_FALLBACK = [
   'g1.globo.com',
   'oglobo.globo.com',
@@ -17,6 +19,15 @@ type CandidateImage = {
   image_url: string;
   width: number;
   height: number;
+  faces?: DetectedFacePayload[];
+};
+
+type DetectedFacePayload = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  score?: number;
 };
 
 const state = {
@@ -31,6 +42,7 @@ const state = {
 };
 
 const WEB_BASE = 'http://localhost:3000';
+let faceModelLoad: Promise<void> | null = null;
 
 function isAllowedDomain(hostname: string) {
   const normalized = hostname.replace(/^www\./, '').toLowerCase();
@@ -50,6 +62,59 @@ function styleBadge(matchCount: number) {
 
 function matchLink(articleId: string): string {
   return `${WEB_BASE}/materia/${articleId}`;
+}
+
+function loadFaceDetector() {
+  if (!faceModelLoad) {
+    faceModelLoad = faceapi.nets.tinyFaceDetector.loadFromUri(chrome.runtime.getURL('models'));
+  }
+  return faceModelLoad;
+}
+
+function bboxFromDetection(detection: any, image: HTMLImageElement): DetectedFacePayload | null {
+  const box = detection?.box;
+  if (!box) {
+    return null;
+  }
+
+  const naturalWidth = image.naturalWidth || image.width;
+  const naturalHeight = image.naturalHeight || image.height;
+  const sourceWidth = detection.imageWidth || naturalWidth;
+  const sourceHeight = detection.imageHeight || naturalHeight;
+  const scaleX = naturalWidth / (sourceWidth || naturalWidth || 1);
+  const scaleY = naturalHeight / (sourceHeight || naturalHeight || 1);
+  const x = Math.max(0, Number(box.x) * scaleX);
+  const y = Math.max(0, Number(box.y) * scaleY);
+  const w = Math.max(0, Number(box.width) * scaleX);
+  const h = Math.max(0, Number(box.height) * scaleY);
+
+  if (![x, y, w, h].every(Number.isFinite) || w < 24 || h < 24) {
+    return null;
+  }
+
+  return {
+    x,
+    y,
+    w: Math.min(w, naturalWidth - x),
+    h: Math.min(h, naturalHeight - y),
+    score: typeof detection.score === 'number' ? detection.score : undefined,
+  };
+}
+
+async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFacePayload[] | undefined> {
+  try {
+    await loadFaceDetector();
+    const detections = await faceapi.detectAllFaces(
+      image,
+      new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }),
+    );
+
+    return detections
+      .map((detection: any) => bboxFromDetection(detection, image))
+      .filter(Boolean) as DetectedFacePayload[];
+  } catch (_error: unknown) {
+    return undefined;
+  }
 }
 
 function suggestionForm(faceId: string) {
@@ -333,8 +398,14 @@ async function analyzeCurrentPage() {
   }
 
   const candidates = parseImages();
-  const imageMap = buildImageMapFromCandidates(candidates);
-  state.analysis.images = candidates.length;
+  const candidatesWithFaces = await Promise.all(
+    candidates.map(async (candidate) => ({
+      ...candidate,
+      faces: await detectFacesForImage(candidate.node),
+    })),
+  );
+  const imageMap = buildImageMapFromCandidates(candidatesWithFaces);
+  state.analysis.images = candidatesWithFaces.length;
   state.analysis.faces = 0;
   state.analysis.matches = 0;
   reportToPopup();
@@ -342,10 +413,11 @@ async function analyzeCurrentPage() {
   const payload = {
     page_url: window.location.href,
     title: document.title,
-    images: candidates.map(({ image_url, width, height }) => ({
+    images: candidatesWithFaces.map(({ image_url, width, height, faces }) => ({
       image_url,
       width,
       height,
+      ...(faces !== undefined ? { faces } : {}),
     })),
   };
 
