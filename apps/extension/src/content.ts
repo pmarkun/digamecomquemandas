@@ -42,6 +42,9 @@ function normalizeHost(hostname: string) {
 }
 
 function styleBadge(matchCount: number) {
+  if (matchCount === 0) {
+    return 'Pessoa não identificada';
+  }
   return `${matchCount} possíveis figuras públicas`;
 }
 
@@ -49,7 +52,69 @@ function matchLink(articleId: string): string {
   return `${WEB_BASE}/materia/${articleId}`;
 }
 
-function buildOverlay(image: HTMLImageElement, matches: any[], faceId: string, articleId: string) {
+function suggestionForm(faceId: string) {
+  return `<form data-qtnf-suggestion-form="true" style="display: grid; gap: 6px; margin-top: 6px;">
+    <label>
+      Nome sugerido
+      <input name="suggested_name" required style="width: 100%;" />
+    </label>
+    <label>
+      Link de fonte pública
+      <input name="source_url" type="url" style="width: 100%;" />
+    </label>
+    <label>
+      Comentário
+      <textarea name="comment" style="width: 100%;"></textarea>
+    </label>
+    <label>
+      Seu e-mail
+      <input name="submitter_email" type="email" style="width: 100%;" />
+    </label>
+    <button type="submit" data-face-id="${faceId}">Enviar sugestão para revisão</button>
+    <div data-qtnf-suggestion-feedback style="font-size: 11px;"></div>
+  </form>`;
+}
+
+function bindSuggestionForm(popup: HTMLDivElement, faceId: string) {
+  const form = popup.querySelector('[data-qtnf-suggestion-form="true"]') as HTMLFormElement | null;
+  const feedback = popup.querySelector('[data-qtnf-suggestion-feedback]') as HTMLDivElement | null;
+  if (!form) {
+    return;
+  }
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const payload = {
+      suggested_name: String(data.get('suggested_name') || '').trim(),
+      source_url: String(data.get('source_url') || '').trim() || null,
+      comment: String(data.get('comment') || '').trim() || null,
+      submitter_email: String(data.get('submitter_email') || '').trim() || null,
+    };
+
+    if (!payload.suggested_name) {
+      if (feedback) {
+        feedback.textContent = 'Informe um nome sugerido.';
+      }
+      return;
+    }
+
+    chrome.runtime.sendMessage({ type: 'SUBMIT_SUGGESTION', faceId, payload }, (response) => {
+      if (feedback) {
+        feedback.textContent = response?.ok
+          ? 'Sugestão enviada. Ela só aparece publicamente após revisão manual.'
+          : 'Não foi possível enviar a sugestão agora.';
+      }
+      if (response?.ok) {
+        form.reset();
+      }
+    });
+  }, { once: true });
+}
+
+function buildOverlay(image: HTMLImageElement, faces: any[], articleId: string) {
+  const matches = faces.flatMap((face: any) => face.matches || []);
+  const firstFaceId = faces[0]?.face_id || '';
   const wrapper = document.createElement('div');
   wrapper.style.position = 'relative';
   wrapper.style.display = 'inline-block';
@@ -67,7 +132,7 @@ function buildOverlay(image: HTMLImageElement, matches: any[], faceId: string, a
   badge.style.zIndex = '2147483647';
 
   const button = document.createElement('button');
-  button.textContent = 'Ver possibilidades';
+  button.textContent = matches.length > 0 ? 'Ver possibilidades' : 'Sugerir identificação';
   button.style.position = 'absolute';
   button.style.top = '0';
   button.style.right = '0';
@@ -87,19 +152,28 @@ function buildOverlay(image: HTMLImageElement, matches: any[], faceId: string, a
   popup.style.zIndex = '2147483650';
 
   button.addEventListener('click', () => {
-    const rows = matches
-      .map(
-        (match: any) =>
-          `<div>
-            <div><strong>${match.name}</strong> — score ${match.score.toFixed(3)}</div>
-            <div><a href="${match.profile_url || '#'}">${match.profile_url ? 'Perfil público' : 'Sem perfil disponível'}</a></div>
-          </div>`,
-      )
-      .join('');
+    const rows = matches.length > 0
+      ? matches
+          .map(
+            (match: any) =>
+              `<div>
+                <div><strong>${match.name}</strong> — score ${match.score.toFixed(3)}</div>
+                <div><a href="${match.profile_url || '#'}">${match.profile_url ? 'Perfil público' : 'Sem perfil disponível'}</a></div>
+              </div>`,
+          )
+          .join('')
+      : `<div>
+          <strong>Pessoa não identificada</strong>
+          <p>Você acha que sabe quem é?</p>
+        </div>`;
     const articleHref = articleId ? `<div><a href="${matchLink(articleId)}">Ver matéria no sistema</a></div>` : '';
     popup.innerHTML = `${rows}
       ${articleHref}
+      ${matches.length === 0 && firstFaceId ? suggestionForm(firstFaceId) : ''}
       <div style="margin-top: 6px; font-size: 11px; color: #444;">Identificação automatizada pode conter erros.</div>`;
+    if (matches.length === 0 && firstFaceId) {
+      bindSuggestionForm(popup, firstFaceId);
+    }
     popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
   });
 
@@ -218,20 +292,16 @@ async function analyzeCurrentPage() {
         return;
       }
 
-      const entryMatches = [];
-      let firstFaceId = `${entry.image_id}-${Math.random()}`;
+      const entryFaces = [];
       for (const face of entry.faces) {
         const matches = face.matches || [];
         state.analysis.faces += 1;
         state.analysis.matches += matches.length;
-        if (matches.length > 0) {
-          firstFaceId = face.face_id || firstFaceId;
-          entryMatches.push(...matches);
-        }
+        entryFaces.push(face);
       }
 
-      if (entryMatches.length > 0) {
-        buildOverlay(imageElement, entryMatches, firstFaceId, result.article_id || '');
+      if (entryFaces.length > 0) {
+        buildOverlay(imageElement, entryFaces, result.article_id || '');
       }
     });
     state.analyzed = true;

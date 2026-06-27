@@ -118,8 +118,9 @@ def check_extension_contracts() -> None:
     ok('extension.allowlist_fallback', 'ALLOWLIST_FALLBACK' in content, 'has fallback local')
     ok('extension.get_allowed_domains_message', 'GET_ALLOWED_DOMAINS' in background, 'background atende consulta de allowlist')
     ok('extension.analyze_page_message', 'ANALYZE_PAGE' in background and '/extension/analyze-page' in background, 'envia página para backend')
-    ok('extension.overlay_only_with_matches', 'if (entryMatches.length > 0)' in content, 'overlay só é criado quando há matches')
-    ok('extension.no_unmatched_overlay_copy', 'Pessoa não identificada' not in content, 'não anuncia overlay para pessoa sem match')
+    ok('extension.overlay_for_detected_faces', 'if (entryFaces.length > 0)' in content, 'overlay é criado para faces detectadas')
+    ok('extension.unmatched_face_copy', 'Pessoa não identificada' in content, 'faces sem match aparecem como pessoa não identificada')
+    ok('extension.submit_suggestion', 'SUBMIT_SUGGESTION' in content and 'suggested_name' in content, 'usuário consegue sugerir identificação')
     ok('extension.popup_disable_site', 'disabledSites' in popup and 'Desativar neste site' in popup, 'popup permite desativar domínio atual')
 
 

@@ -91,10 +91,11 @@ make seed
 - API com fluxo ponta a ponta de análise de página, resultados e contestação.
 - Web pública com páginas: home, perfil, conexões, matéria e admin.
 - Seed inicial (`infra/seed/people.json`) com 10 pessoas e 2 imagens públicas.
-- Extensão V3 mínima com allowlist, análise remota, overlay e sugestão manual.
+- Extensão V3 mínima com allowlist, análise remota, overlay, marcação de pessoa não identificada e sugestão manual.
+- Busca vetorial com PostgreSQL + pgvector, mantendo fallback local para testes com SQLite.
 
 ## Limitações atuais
 
-- Pipeline usa embedding determinístico por URL, sem InsightFace real ainda.
-- Vetores persistidos como JSON (placeholder para migração futura para `pgvector`).
+- Pipeline usa detector/embedding determinístico por imagem, sem InsightFace real ainda.
+- Embeddings são persistidos em coluna `vector(512)` no PostgreSQL/pgvector e também em JSON para fallback de testes.
 - Worker é modo demo inicial (sem fila/broker real).
