@@ -55,8 +55,9 @@ function matchLink(articleId: string): string {
 function suggestionForm(faceId: string) {
   return `<form data-qtnf-suggestion-form="true" style="display: grid; gap: 6px; margin-top: 6px;">
     <label>
-      Nome sugerido
-      <input name="suggested_name" required style="width: 100%;" />
+      Nome da pessoa
+      <input name="suggested_name" data-qtnf-person-input="${faceId}" list="qtnf-people-${faceId}" autocomplete="off" required style="width: 100%;" />
+      <datalist id="qtnf-people-${faceId}"></datalist>
     </label>
     <label>
       Link de fonte pública
@@ -71,13 +72,45 @@ function suggestionForm(faceId: string) {
       <input name="submitter_email" type="email" style="width: 100%;" />
     </label>
     <button type="submit" data-face-id="${faceId}">Enviar sugestão para revisão</button>
+    <a href="${WEB_BASE}/admin?new_person=1" target="_blank" rel="noreferrer">Criar novo registro no admin</a>
     <div data-qtnf-suggestion-feedback style="font-size: 11px;"></div>
   </form>`;
+}
+
+function bindAutocomplete(popup: HTMLDivElement, faceId: string) {
+  const input = popup.querySelector(`[data-qtnf-person-input="${faceId}"]`) as HTMLInputElement | null;
+  const list = popup.querySelector(`#qtnf-people-${faceId}`) as HTMLDataListElement | null;
+  if (!input || !list) {
+    return;
+  }
+
+  let timer: number | undefined;
+  input.addEventListener('input', () => {
+    window.clearTimeout(timer);
+    const query = input.value.trim();
+    if (query.length < 2) {
+      list.innerHTML = '';
+      return;
+    }
+
+    timer = window.setTimeout(() => {
+      chrome.runtime.sendMessage({ type: 'SEARCH_PEOPLE', query }, (response) => {
+        if (!response?.ok || !Array.isArray(response.payload)) {
+          return;
+        }
+
+        list.innerHTML = response.payload
+          .map((person: any) => `<option value="${person.display_name || person.name}" data-person-id="${person.id}"></option>`)
+          .join('');
+      });
+    }, 180);
+  });
 }
 
 function bindSuggestionForm(popup: HTMLDivElement, faceId: string) {
   const form = popup.querySelector('[data-qtnf-suggestion-form="true"]') as HTMLFormElement | null;
   const feedback = popup.querySelector('[data-qtnf-suggestion-feedback]') as HTMLDivElement | null;
+  bindAutocomplete(popup, faceId);
   if (!form) {
     return;
   }
@@ -85,8 +118,11 @@ function bindSuggestionForm(popup: HTMLDivElement, faceId: string) {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const data = new FormData(form);
+    const name = String(data.get('suggested_name') || '').trim();
+    const selectedOption = Array.from(form.querySelectorAll('option')).find((option: any) => option.value === name) as HTMLOptionElement | undefined;
     const payload = {
-      suggested_name: String(data.get('suggested_name') || '').trim(),
+      suggested_name: name,
+      suggested_person_id: selectedOption?.dataset.personId || null,
       source_url: String(data.get('source_url') || '').trim() || null,
       comment: String(data.get('comment') || '').trim() || null,
       submitter_email: String(data.get('submitter_email') || '').trim() || null,
@@ -112,9 +148,27 @@ function bindSuggestionForm(popup: HTMLDivElement, faceId: string) {
   }, { once: true });
 }
 
+function faceLabel(face: any) {
+  const matches = face.matches || [];
+  return matches.length > 0 ? styleBadge(matches.length) : 'Pessoa não identificada';
+}
+
+function positionMarker(marker: HTMLElement, face: any, image: HTMLImageElement) {
+  const bbox = face.bbox || {};
+  const naturalWidth = image.naturalWidth || image.width || 1;
+  const naturalHeight = image.naturalHeight || image.height || 1;
+  const left = Math.max(0, (Number(bbox.x || 0) / naturalWidth) * 100);
+  const top = Math.max(0, (Number(bbox.y || 0) / naturalHeight) * 100);
+  const width = Math.min(100 - left, (Number(bbox.w || naturalWidth * 0.2) / naturalWidth) * 100);
+  const height = Math.min(100 - top, (Number(bbox.h || naturalHeight * 0.2) / naturalHeight) * 100);
+
+  marker.style.left = `${left}%`;
+  marker.style.top = `${top}%`;
+  marker.style.width = `${Math.max(8, width)}%`;
+  marker.style.height = `${Math.max(8, height)}%`;
+}
+
 function buildOverlay(image: HTMLImageElement, faces: any[], articleId: string) {
-  const matches = faces.flatMap((face: any) => face.matches || []);
-  const firstFaceId = faces[0]?.face_id || '';
   const target = image.parentElement?.tagName === 'PICTURE' ? image.parentElement : image;
   const wrapper = document.createElement('div');
   wrapper.style.position = 'relative';
@@ -123,53 +177,52 @@ function buildOverlay(image: HTMLImageElement, faces: any[], articleId: string) 
   wrapper.style.verticalAlign = 'top';
   wrapper.dataset.qtnfOverlay = 'true';
 
-  const badge = document.createElement('div');
-  badge.textContent = styleBadge(matches.length);
-  badge.style.position = 'absolute';
-  badge.style.left = '10px';
-  badge.style.bottom = '10px';
-  badge.style.maxWidth = '180px';
-  badge.style.background = 'rgba(247,242,232,0.94)';
-  badge.style.color = '#191919';
-  badge.style.fontFamily = 'Georgia, serif';
-  badge.style.fontSize = '12px';
-  badge.style.lineHeight = '1.25';
-  badge.style.padding = '5px 7px';
-  badge.style.border = '1px solid #2B2B2B';
-  badge.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-  badge.style.zIndex = '2147483647';
+  target.parentNode?.insertBefore(wrapper, target);
+  wrapper.appendChild(target);
 
-  const button = document.createElement('button');
-  button.textContent = matches.length > 0 ? 'Ver possibilidades' : 'Sugerir identificação';
-  button.style.position = 'absolute';
-  button.style.top = '10px';
-  button.style.right = '10px';
-  button.style.background = '#191919';
-  button.style.color = '#F7F2E8';
-  button.style.border = '1px solid #2B2B2B';
-  button.style.padding = '6px 8px';
-  button.style.fontSize = '12px';
-  button.style.cursor = 'pointer';
-  button.style.zIndex = '2147483647';
+  faces.forEach((face: any, index: number) => {
+    const matches = face.matches || [];
+    const faceId = face.face_id || '';
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.textContent = faceLabel(face);
+    marker.style.position = 'absolute';
+    marker.style.background = matches.length > 0 ? 'rgba(39,93,173,0.16)' : 'rgba(217,74,56,0.14)';
+    marker.style.color = '#191919';
+    marker.style.border = matches.length > 0 ? '2px solid #275DAD' : '2px solid #D94A38';
+    marker.style.padding = '2px';
+    marker.style.fontFamily = 'Georgia, serif';
+    marker.style.fontSize = '11px';
+    marker.style.lineHeight = '1.15';
+    marker.style.cursor = 'pointer';
+    marker.style.zIndex = '2147483647';
+    marker.style.boxShadow = '0 2px 10px rgba(0,0,0,0.18)';
+    positionMarker(marker, face, image);
 
-  const popup = document.createElement('div');
-  popup.style.position = 'absolute';
-  popup.style.top = '44px';
-  popup.style.right = '10px';
-  popup.style.padding = '10px';
-  popup.style.display = 'none';
-  popup.style.width = '260px';
-  popup.style.maxWidth = 'calc(100% - 20px)';
-  popup.style.background = '#F7F2E8';
-  popup.style.color = '#191919';
-  popup.style.border = '1px solid #2B2B2B';
-  popup.style.fontFamily = 'Georgia, serif';
-  popup.style.fontSize = '12px';
-  popup.style.lineHeight = '1.45';
-  popup.style.boxShadow = '0 8px 24px rgba(0,0,0,0.22)';
-  popup.style.zIndex = '2147483650';
+    const popup = document.createElement('div');
+    popup.style.position = 'absolute';
+    popup.style.left = marker.style.left;
+    popup.style.top = `calc(${marker.style.top} + ${marker.style.height} + 8px)`;
+    popup.style.padding = '10px';
+    popup.style.display = 'none';
+    popup.style.width = '280px';
+    popup.style.maxWidth = 'calc(100% - 20px)';
+    popup.style.background = '#F7F2E8';
+    popup.style.color = '#191919';
+    popup.style.border = '1px solid #2B2B2B';
+    popup.style.fontFamily = 'Georgia, serif';
+    popup.style.fontSize = '12px';
+    popup.style.lineHeight = '1.45';
+    popup.style.boxShadow = '0 8px 24px rgba(0,0,0,0.22)';
+    popup.style.zIndex = '2147483650';
 
-  button.addEventListener('click', () => {
+    marker.addEventListener('click', () => {
+      wrapper.querySelectorAll('[data-qtnf-face-popup]').forEach((node: any) => {
+        if (node !== popup) {
+          node.style.display = 'none';
+        }
+      });
+
     const rows = matches.length > 0
       ? matches
           .map(
@@ -182,24 +235,23 @@ function buildOverlay(image: HTMLImageElement, faces: any[], articleId: string) 
           .join('')
       : `<div>
           <strong>Pessoa não identificada</strong>
-          <p>Você acha que sabe quem é?</p>
+          <p>Você acha que sabe quem é? Busque uma pessoa existente ou envie um novo nome para curadoria.</p>
         </div>`;
     const articleHref = articleId ? `<div><a href="${matchLink(articleId)}">Ver matéria no sistema</a></div>` : '';
     popup.innerHTML = `${rows}
       ${articleHref}
-      ${matches.length === 0 && firstFaceId ? suggestionForm(firstFaceId) : ''}
+      ${matches.length === 0 && faceId ? suggestionForm(faceId) : ''}
       <div style="margin-top: 6px; font-size: 11px; color: #444;">Identificação automatizada pode conter erros.</div>`;
-    if (matches.length === 0 && firstFaceId) {
-      bindSuggestionForm(popup, firstFaceId);
+    if (matches.length === 0 && faceId) {
+      bindSuggestionForm(popup, faceId);
     }
     popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
   });
 
-  target.parentNode?.insertBefore(wrapper, target);
-  wrapper.appendChild(target);
-  wrapper.appendChild(badge);
-  wrapper.appendChild(button);
-  wrapper.appendChild(popup);
+    popup.dataset.qtnfFacePopup = String(index);
+    wrapper.appendChild(marker);
+    wrapper.appendChild(popup);
+  });
 }
 
 function parseImages(): CandidateImage[] {

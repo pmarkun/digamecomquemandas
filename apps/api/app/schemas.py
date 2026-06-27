@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -98,7 +99,7 @@ class ContestRequest(BaseModel):
 
 class SuggestionCreate(BaseModel):
     suggested_name: str
-    suggested_person_id: str | None = None
+    suggested_person_id: UUID | None = None
     source_url: str | None = None
     comment: str | None = None
     submitter_email: str | None = None

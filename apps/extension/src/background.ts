@@ -71,6 +71,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === 'SEARCH_PEOPLE') {
+    const query = encodeURIComponent(String(message.query || '').trim());
+    if (!query) {
+      sendResponse({ ok: true, payload: [] });
+      return true;
+    }
+
+    fetch(`${API_BASE}/people?query=${query}`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || 'Erro ao buscar pessoas');
+        }
+        return res.json();
+      })
+      .then((data) => sendResponse({ ok: true, payload: Array.isArray(data) ? data : [] }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || 'erro' }));
+    return true;
+  }
+
   if (message?.type === 'REPORT_ANALYSIS_STATS') {
     lastAnalysis = message.payload || lastAnalysis;
     return false;
