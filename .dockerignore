@@ -1,0 +1,11 @@
+.git
+.diga-me-cache
+**/.diga-me-cache
+**/.venv
+**/__pycache__
+**/*.pyc
+**/node_modules
+apps/extension/dist
+apps/web/.next
+qtnf.sqlite3
+apps/api/qtnf.sqlite3

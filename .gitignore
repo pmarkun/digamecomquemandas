@@ -1,0 +1,37 @@
+# Node / frontend
+node_modules
+apps/extension/dist
+apps/web/.next
+dist
+coverage
+
+# Python
+.venv
+__pycache__
+*.pyc
+
+# Environment and local data
+.env
+infra/docker/.env
+**/.env.local
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Build outputs
+build/
+out/
+
+# uv
+.venv/
+uv.lock
+
+# Local tool caches
+.diga-me-cache/
+apps/*/.diga-me-cache/
+apps/*/pnpm-lock.yaml
+apps/*/pnpm-workspace.yaml
+qtnf.sqlite3
+apps/api/qtnf.sqlite3

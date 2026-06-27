@@ -1,0 +1,12 @@
+packages:
+  - "apps/extension"
+  - "apps/web"
+
+onlyBuiltDependencies:
+  - "@next/swc"
+  - "esbuild"
+  - "sharp"
+
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

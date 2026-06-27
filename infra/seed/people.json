@@ -1,0 +1,91 @@
+[
+  {
+    "name": "Marina Silva",
+    "slug": "marina-silva",
+    "category": "politician",
+    "description": "Figura pública no debate ambiental e político.",
+    "public_office": "Ex-senadora",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Marina_Silva"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/7/73/Marina_Silva_in_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/e/e8/Marina_Silva_2019.jpg"]
+  },
+  {
+    "name": "Geraldo Alckmin",
+    "slug": "geraldo-alckmin",
+    "category": "politician",
+    "description": "Figura pública ligada à gestão de Estado.",
+    "public_office": "Governador",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Geraldo_Alckmin"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/8/81/Geraldo_Alckmin_2020.jpg", "https://upload.wikimedia.org/wikipedia/commons/7/7f/Geraldo_Alckmin_2018.jpg"]
+  },
+  {
+    "name": "Dilma Rousseff",
+    "slug": "dilma-rousseff",
+    "category": "politician",
+    "description": "Líder política brasileira.",
+    "public_office": "Ex-Presidente",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Dilma_Rousseff"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/2/2a/Dilma_rousseff_2015.jpg", "https://upload.wikimedia.org/wikipedia/commons/7/71/Dilma_2014.jpg"]
+  },
+  {
+    "name": "Aécio Neves",
+    "slug": "aecio-neves",
+    "category": "politician",
+    "description": "Figura pública da política nacional.",
+    "public_office": "Ex-senador",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Aecio_Neves"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/9/96/Aecio_2018.jpg", "https://upload.wikimedia.org/wikipedia/commons/2/21/Aecio_Neves_2022.jpg"]
+  },
+  {
+    "name": "Lula",
+    "slug": "lula",
+    "category": "politician",
+    "description": "Atuação política e histórica no país.",
+    "public_office": "Presidente",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Luiz_Inacio_Lula_da_Silva"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/7/7c/Lula_2019.jpg", "https://upload.wikimedia.org/wikipedia/commons/5/57/Lula_2010.jpg"]
+  },
+  {
+    "name": "Bolsonaro",
+    "slug": "jair-bolsonaro",
+    "category": "politician",
+    "description": "Figura pública na cena política recente.",
+    "public_office": "Presidente",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Jair_Bolsonaro"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/a/a5/Jair_Bolsonaro_2019.jpg", "https://upload.wikimedia.org/wikipedia/commons/0/0f/Jair_Bolsonaro_2021.jpg"]
+  },
+  {
+    "name": "Ciro Gomes",
+    "slug": "ciro-gomes",
+    "category": "politician",
+    "description": "Atuação no debate econômico e político.",
+    "public_office": "Deputado Federal",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Ciro_Gomes"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/1/1c/Ciro_Gomes_2018.jpg", "https://upload.wikimedia.org/wikipedia/commons/4/4a/Ciro_Gomes_2022.jpg"]
+  },
+  {
+    "name": "Damares Alves",
+    "slug": "damares-alves",
+    "category": "politician",
+    "description": "Atuação institucional e religiosa no Brasil.",
+    "public_office": "Ministra",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Damares_Alves"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/6/6e/Damares_Alves_2018.jpg", "https://upload.wikimedia.org/wikipedia/commons/3/35/Damares_Alves_2020.jpg"]
+  },
+  {
+    "name": "Silas Malafaia",
+    "slug": "silas-malafaia",
+    "category": "religious_influencer",
+    "description": "Atuação pública em debates sociais.",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Silas_Malafaia"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/2/2f/Silas_Malafaia_2019.jpg", "https://upload.wikimedia.org/wikipedia/commons/2/2d/Silas_Malafaia_2022.jpg"]
+  },
+  {
+    "name": "Joice Hasselmann",
+    "slug": "joice-hasselmann",
+    "category": "journalist",
+    "description": "Atuação política e de comunicação.",
+    "public_office": "Deputada",
+    "source_urls": ["https://pt.wikipedia.org/wiki/Joice_Hasselmann"],
+    "reference_images": ["https://upload.wikimedia.org/wikipedia/commons/9/92/Joice_Hasselmann_2018.jpg", "https://upload.wikimedia.org/wikipedia/commons/b/ba/Joice_Hasselmann_2020.jpg"]
+  }
+]
