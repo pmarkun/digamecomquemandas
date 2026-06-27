@@ -4,10 +4,29 @@ from uuid import UUID, uuid4
 
 from sqlmodel import Field, Relationship, SQLModel
 from sqlalchemy import JSON, Column
+from sqlalchemy.types import TypeDecorator
+from pgvector.sqlalchemy import Vector
 
 
 def utc_now() -> datetime:
     return datetime.now(tz=timezone.utc)
+
+
+class EmbeddingVector(TypeDecorator):
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Vector(512))
+        return dialect.type_descriptor(JSON())
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        return list(value)
 
 
 class Article(SQLModel, table=True):
@@ -75,6 +94,7 @@ class FaceEmbedding(SQLModel, table=True):
     person_id: UUID = Field(foreign_key="person.id")
     reference_image_id: UUID = Field(foreign_key="personreferenceimage.id")
     embedding: List[float] = Field(default_factory=list, sa_column=Column(JSON))
+    embedding_vector: Optional[List[float]] = Field(default=None, sa_column=Column(EmbeddingVector()))
     model_name: str
     model_version: str
     quality_score: Optional[float] = None
@@ -89,6 +109,7 @@ class DetectedFace(SQLModel, table=True):
     article_image_id: UUID = Field(foreign_key="articleimage.id")
     bbox: Dict[str, float] = Field(sa_column=Column(JSON))
     embedding: Optional[List[float]] = Field(default=None, sa_column=Column(JSON))
+    embedding_vector: Optional[List[float]] = Field(default=None, sa_column=Column(EmbeddingVector()))
     quality_score: Optional[float] = None
     model_name: str = "buffalo_l"
     model_version: str = "0.1"

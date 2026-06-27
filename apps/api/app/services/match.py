@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from hashlib import sha256
 from math import sqrt
 from typing import List
+from uuid import UUID
+
+from sqlalchemy import text
+from sqlmodel import Session
 
 from ..config import get_settings
 from ..models import FaceEmbedding
@@ -39,35 +43,80 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
-def match_candidates(face_embedding: list[float], person_embeddings: list[FaceEmbedding]) -> list[dict]:
+def _embedding_literal(face_embedding: list[float]) -> str:
+    return "[" + ",".join(f"{value:.12f}" for value in face_embedding) + "]"
+
+
+def _status_for_score(score: float) -> str:
+    settings = get_settings()
+    if score >= settings.face_auto_approve_threshold:
+        return "AUTO_APPROVED"
+    if score >= settings.face_display_threshold:
+        return "APPROVED"
+    return "AUTO"
+
+
+def _match_candidates_pgvector(session: Session, face_embedding: list[float]) -> list[dict]:
+    settings = get_settings()
+    query = text(
+        """
+        SELECT
+          person_id,
+          1 - (embedding_vector <=> CAST(:embedding AS vector)) AS score,
+          embedding_vector <=> CAST(:embedding AS vector) AS distance
+        FROM faceembedding
+        WHERE
+          embedding_vector IS NOT NULL
+          AND 1 - (embedding_vector <=> CAST(:embedding AS vector)) >= :threshold
+        ORDER BY embedding_vector <=> CAST(:embedding AS vector)
+        LIMIT :limit
+        """
+    )
+    rows = session.exec(
+        query,
+        params={
+            "embedding": _embedding_literal(face_embedding),
+            "threshold": settings.face_match_threshold,
+            "limit": settings.max_matches_per_face,
+        },
+    ).all()
+    return [
+        {
+            "person_id": row.person_id if isinstance(row.person_id, UUID) else UUID(str(row.person_id)),
+            "score": float(row.score),
+            "status": _status_for_score(float(row.score)),
+            "distance": float(row.distance),
+        }
+        for row in rows
+    ]
+
+
+def _match_candidates_python(face_embedding: list[float], person_embeddings: list[FaceEmbedding]) -> list[dict]:
     settings = get_settings()
     threshold = settings.face_match_threshold
-    display_threshold = settings.face_display_threshold
-    auto_threshold = settings.face_auto_approve_threshold
 
     scored = []
     for pe in person_embeddings:
         score = cosine(face_embedding, pe.embedding)
         if score < threshold:
             continue
-        status = "AUTO"
-        if score >= auto_threshold:
-            status = "AUTO_APPROVED"
-        elif score >= display_threshold:
-            status = "APPROVED"
         scored.append(
             {
                 "person_id": pe.person_id,
-                "name": pe.person.name,
-                "slug": pe.person.slug,
                 "score": score,
-                "status": status,
+                "status": _status_for_score(score),
                 "distance": 1 - score,
             }
         )
 
     scored.sort(key=lambda item: item["score"], reverse=True)
     return scored[: settings.max_matches_per_face]
+
+
+def match_candidates(session: Session, face_embedding: list[float], person_embeddings: list[FaceEmbedding]) -> list[dict]:
+    if session.bind and session.bind.dialect.name == "postgresql":
+        return _match_candidates_pgvector(session, face_embedding)
+    return _match_candidates_python(face_embedding, person_embeddings)
 
 
 def detect_embedding(person_url: str) -> list[float]:

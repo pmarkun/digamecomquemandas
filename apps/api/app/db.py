@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -44,7 +45,36 @@ engine = make_engine()
 def init_db() -> None:
     from . import models  # noqa: F401
 
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     SQLModel.metadata.create_all(engine)
+
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE faceembedding ADD COLUMN IF NOT EXISTS embedding_vector vector(512)"))
+            connection.execute(text("ALTER TABLE detectedface ADD COLUMN IF NOT EXISTS embedding_vector vector(512)"))
+            connection.execute(
+                text(
+                    "UPDATE faceembedding "
+                    "SET embedding_vector = embedding::text::vector "
+                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE detectedface "
+                    "SET embedding_vector = embedding::text::vector "
+                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_faceembedding_embedding_vector_cosine "
+                    "ON faceembedding USING ivfflat (embedding_vector vector_cosine_ops) WITH (lists = 10)"
+                )
+            )
 
 
 def get_session():

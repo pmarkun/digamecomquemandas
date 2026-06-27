@@ -71,6 +71,7 @@ def seed_initial_people() -> None:
                         person_id=person.id,
                         reference_image_id=ref.id,
                         embedding=embedding_from_seed(ref_url),
+                        embedding_vector=embedding_from_seed(ref_url),
                         model_name="buffalo_l",
                         model_version="0.1",
                     )

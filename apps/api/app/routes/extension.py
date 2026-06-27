@@ -142,11 +142,16 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
         if process_image:
             for face in detect_faces(item.width, item.height):
                 embed = embedding_from_seed(item.image_url)
-                detected = DetectedFace(article_image_id=image.id, bbox=vars(face.bbox), embedding=embed)
+                detected = DetectedFace(
+                    article_image_id=image.id,
+                    bbox=vars(face.bbox),
+                    embedding=embed,
+                    embedding_vector=embed,
+                )
                 session.add(detected)
                 session.flush()
 
-                for item_match in match_candidates(embed, person_embeddings):
+                for item_match in match_candidates(session, embed, person_embeddings):
                     person_key = str(item_match["person_id"])
                     person_obj = person_map.get(person_key)
                     if person_obj is None:

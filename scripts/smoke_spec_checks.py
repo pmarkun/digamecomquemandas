@@ -53,6 +53,21 @@ def check_seed() -> None:
     ok('seed.min_ref_images', all(len(item.get('reference_images', [])) >= 2 for item in data), 'cada pessoa com mínimo de 2 referências')
 
 
+def check_pgvector_contracts() -> None:
+    models = (ROOT / 'apps/api/app/models.py').read_text(encoding='utf-8')
+    db = (ROOT / 'apps/api/app/db.py').read_text(encoding='utf-8')
+    matcher = (ROOT / 'apps/api/app/services/match.py').read_text(encoding='utf-8')
+    seed = (ROOT / 'apps/api/app/seed.py').read_text(encoding='utf-8')
+    pyproject = (ROOT / 'apps/api/pyproject.toml').read_text(encoding='utf-8')
+
+    ok('pgvector.dependency', '"pgvector>=' in pyproject, 'API declara dependência pgvector')
+    ok('pgvector.model_column', 'embedding_vector' in models and 'Vector(512)' in models, 'modelos têm coluna vector(512)')
+    ok('pgvector.extension', 'CREATE EXTENSION IF NOT EXISTS vector' in db, 'init_db habilita extensão vector')
+    ok('pgvector.index', 'vector_cosine_ops' in db, 'init_db cria índice coseno pgvector')
+    ok('pgvector.query', '<=>' in matcher and 'CAST(:embedding AS vector)' in matcher, 'matching usa operador vetorial do pgvector')
+    ok('pgvector.seed_vectors', 'embedding_vector=embedding_from_seed' in seed, 'seed preenche embedding_vector')
+
+
 def check_make_targets() -> None:
     text = (ROOT / 'Makefile').read_text(encoding='utf-8')
     for target in ["setup", "dev", "migrate", "seed", "test", "lint"]:
@@ -114,6 +129,7 @@ def main() -> int:
     check_admin_routes()
     check_people_routes()
     check_seed()
+    check_pgvector_contracts()
     check_make_targets()
     check_compose_services()
     check_frontend_contracts()
