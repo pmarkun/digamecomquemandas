@@ -71,16 +71,18 @@ export default function AdminPage() {
   const [allowedDomains, setAllowedDomains] = useState<AllowedDomain[]>([]);
   const [newDomain, setNewDomain] = useState('');
   const [personQuery, setPersonQuery] = useState('');
+  const [showSuggestionHistory, setShowSuggestionHistory] = useState(false);
 
   const headersFor = (authToken = token) => ({
     Authorization: `Bearer ${authToken}`,
   });
 
-  const loadProtected = async (authToken = token) => {
+  const loadProtected = async (authToken = token, includeSuggestionHistory = showSuggestionHistory) => {
     const headers = headersFor(authToken);
+    const suggestionPath = includeSuggestionHistory ? '/admin/suggestions?status=' : '/admin/suggestions';
     const [listPeople, listSuggestions, listMatches, listOptouts, listAudits, listAllowedDomains] = await Promise.all([
       api.get<Person[]>(`/admin/people`, headers),
-      api.get<Suggestion[]>(`/admin/suggestions`, headers),
+      api.get<Suggestion[]>(suggestionPath, headers),
       api.get<Match[]>(`/admin/matches`, headers),
       api.get<Optout[]>(`/admin/optout-requests`, headers),
       api.get<AuditLog[]>(`/admin/audit-logs`, headers),
@@ -137,6 +139,12 @@ export default function AdminPage() {
   const reviewSuggestion = async (suggestionId: string, status: 'APPROVED' | 'REJECTED') => {
     await api.post(`/admin/suggestions/${suggestionId}/review`, { status }, headersFor());
     await loadProtected();
+  };
+
+  const toggleSuggestionHistory = async () => {
+    const next = !showSuggestionHistory;
+    setShowSuggestionHistory(next);
+    await loadProtected(token, next);
   };
 
   const reviewMatch = async (matchId: string, status: 'APPROVED' | 'REJECTED') => {
@@ -207,7 +215,7 @@ export default function AdminPage() {
           <section className="dashboard-grid">
             <div className="stat"><strong>{people.length}</strong><span>Pessoas</span></div>
             <div className="stat"><strong>{matches.length}</strong><span>Matches</span></div>
-            <div className="stat"><strong>{suggestions.length}</strong><span>Sugestões</span></div>
+            <div className="stat"><strong>{suggestions.length}</strong><span>{showSuggestionHistory ? 'Sugestões no histórico' : 'Sugestões pendentes'}</span></div>
             <div className="stat"><strong>{optouts.length}</strong><span>Pedidos</span></div>
           </section>
 
@@ -266,8 +274,13 @@ export default function AdminPage() {
           </section>
 
           <section className="panel wide">
-          <h2>Sugestões</h2>
-          {suggestions.length === 0 && <p>Nenhuma sugestão encontrada.</p>}
+          <div className="toolbar">
+            <h2>{showSuggestionHistory ? 'Histórico de sugestões' : 'Sugestões pendentes'}</h2>
+            <button className="button secondary" type="button" onClick={toggleSuggestionHistory}>
+              {showSuggestionHistory ? 'Ver pendentes' : 'Ver histórico'}
+            </button>
+          </div>
+          {suggestions.length === 0 && <p>{showSuggestionHistory ? 'Nenhuma sugestão no histórico.' : 'Nenhuma sugestão pendente.'}</p>}
           <table className="table">
             <thead><tr><th>Nome sugerido</th><th>Comentário</th><th>Status</th><th>Ações</th></tr></thead>
             <tbody>
@@ -277,8 +290,14 @@ export default function AdminPage() {
                 <td>{item.comment || '-'}</td>
                 <td><span className="badge">{item.status}</span></td>
                 <td>
-                  <button className="button secondary" type="button" onClick={() => reviewSuggestion(item.id, 'APPROVED')}>Aprovar</button>{' '}
-                  <button className="button secondary" type="button" onClick={() => reviewSuggestion(item.id, 'REJECTED')}>Rejeitar</button>
+                  {item.status === 'PENDING_REVIEW' ? (
+                    <>
+                      <button className="button secondary" type="button" onClick={() => reviewSuggestion(item.id, 'APPROVED')}>Aprovar</button>{' '}
+                      <button className="button secondary" type="button" onClick={() => reviewSuggestion(item.id, 'REJECTED')}>Rejeitar</button>
+                    </>
+                  ) : (
+                    <span className="muted">Revisada</span>
+                  )}
                 </td>
               </tr>
             ))}

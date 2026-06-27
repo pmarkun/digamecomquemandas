@@ -381,7 +381,14 @@ def optout_person(person_id: str, session: Session = Depends(get_session), _: bo
 
 
 @router.get("/suggestions")
-def list_suggestions(session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+def list_suggestions(
+    status: str | None = "PENDING_REVIEW",
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    stmt = select(FaceSuggestion).order_by(FaceSuggestion.created_at.desc())
+    if status:
+        stmt = stmt.where(FaceSuggestion.status == status)
     return [
         {
             "id": str(item.id),
@@ -394,7 +401,7 @@ def list_suggestions(session: Session = Depends(get_session), _: bool = Depends(
             "status": item.status,
             "created_at": item.created_at,
         }
-        for item in session.exec(select(FaceSuggestion)).all()
+        for item in session.exec(stmt).all()
     ]
 
 
