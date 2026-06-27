@@ -49,6 +49,12 @@ type AuditLog = {
   metadata?: Record<string, unknown>;
 };
 
+type AllowedDomain = {
+  id: string;
+  domain: string;
+  enabled: boolean;
+};
+
 export default function AdminPage() {
   const [token, setToken] = useState('');
   const [email, setEmail] = useState('admin@example.com');
@@ -60,6 +66,8 @@ export default function AdminPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [optouts, setOptouts] = useState<Optout[]>([]);
   const [audits, setAudits] = useState<AuditLog[]>([]);
+  const [allowedDomains, setAllowedDomains] = useState<AllowedDomain[]>([]);
+  const [newDomain, setNewDomain] = useState('');
 
   const headersFor = (authToken = token) => ({
     Authorization: `Bearer ${authToken}`,
@@ -67,18 +75,20 @@ export default function AdminPage() {
 
   const loadProtected = async (authToken = token) => {
     const headers = headersFor(authToken);
-    const [listPeople, listSuggestions, listMatches, listOptouts, listAudits] = await Promise.all([
+    const [listPeople, listSuggestions, listMatches, listOptouts, listAudits, listAllowedDomains] = await Promise.all([
       api.get<Person[]>(`/admin/people`, headers),
       api.get<Suggestion[]>(`/admin/suggestions`, headers),
       api.get<Match[]>(`/admin/matches`, headers),
       api.get<Optout[]>(`/admin/optout-requests`, headers),
       api.get<AuditLog[]>(`/admin/audit-logs`, headers),
+      api.get<AllowedDomain[]>(`/admin/allowed-domains`, headers),
     ]);
     setPeople(listPeople);
     setSuggestions(listSuggestions);
     setMatches(listMatches);
     setOptouts(listOptouts);
     setAudits(listAudits);
+    setAllowedDomains(listAllowedDomains);
   };
 
   const login = async (event: FormEvent) => {
@@ -133,6 +143,19 @@ export default function AdminPage() {
     await loadProtected();
   };
 
+  const addAllowedDomain = async (event: FormEvent) => {
+    event.preventDefault();
+    const normalized = newDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+    if (!normalized) {
+      setFeedback('Informe um domínio válido.');
+      return;
+    }
+    await api.post(`/admin/allowed-domains?domain=${encodeURIComponent(normalized)}`, {}, headersFor());
+    setNewDomain('');
+    setFeedback(`Domínio ${normalized} adicionado à allowlist.`);
+    await loadProtected();
+  };
+
   return (
     <main style={{ padding: '2rem', background: '#F7F2E8', color: '#191919' }}>
       <h1>Admin</h1>
@@ -153,6 +176,24 @@ export default function AdminPage() {
       {logged && (
         <div>
           <button type="button" onClick={addPerson}>Adicionar pessoa</button>
+          <h2>Allowlist de domínios</h2>
+          <form onSubmit={addAllowedDomain} style={{ marginBottom: '1rem' }}>
+            <input
+              value={newDomain}
+              onChange={(event) => setNewDomain(event.target.value)}
+              placeholder="g1.globo.com"
+            />
+            <button type="submit">Adicionar domínio</button>
+          </form>
+          {allowedDomains.length === 0 && <p>Nenhum domínio liberado.</p>}
+          <ul>
+            {allowedDomains.map((item) => (
+              <li key={item.id}>
+                {item.domain} — {item.enabled ? 'ativo' : 'desativado'}
+              </li>
+            ))}
+          </ul>
+
           <h2>Pessoas</h2>
           <ul>
             {people.map((item) => (

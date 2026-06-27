@@ -49,6 +49,8 @@ export default async function ArticlePage({ params }: { params: { id: string } }
                     <a href={`/pessoa/${match.slug}`}>{match.name}</a> (score {match.score.toFixed(3)})
                     {' '}
                     [{match.status}]
+                    {' '}
+                    <a href={`/pessoa/${match.slug}/contestar`}>contestar identificação</a>
                   </li>
                 )),
               ),
