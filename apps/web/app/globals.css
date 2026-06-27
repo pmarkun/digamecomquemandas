@@ -2,8 +2,246 @@ html,
 body {
   margin: 0;
   padding: 0;
+  background: #f7f2e8;
+  color: #191919;
 }
 
 a {
   color: #275DAD;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.shell {
+  min-height: 100vh;
+  background:
+    linear-gradient(90deg, rgba(25, 25, 25, 0.04) 1px, transparent 1px),
+    linear-gradient(rgba(25, 25, 25, 0.035) 1px, transparent 1px),
+    #f7f2e8;
+  background-size: 28px 28px;
+  color: #191919;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #2b2b2b;
+  background: rgba(247, 242, 232, 0.92);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  color: #191919;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.navline {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.page {
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 4rem;
+}
+
+.home-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
+  gap: 2rem;
+  align-items: end;
+  padding: 4rem 0 3rem;
+  border-bottom: 2px solid #191919;
+}
+
+.kicker,
+.eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-size: 0.78rem;
+}
+
+.home-title {
+  font-size: clamp(2.4rem, 6vw, 5.8rem);
+  line-height: 0.96;
+  margin: 0.5rem 0 1rem;
+  max-width: 920px;
+}
+
+.lede {
+  font-size: 1.18rem;
+  line-height: 1.6;
+  max-width: 760px;
+}
+
+.notice-box,
+.panel {
+  border: 1px solid #2b2b2b;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.notice-box {
+  padding: 1rem;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.panel {
+  padding: 1rem;
+}
+
+.panel h2,
+.panel h3 {
+  margin-top: 0;
+}
+
+.admin-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 2px solid #191919;
+}
+
+.admin-title {
+  font-size: clamp(2rem, 5vw, 4.2rem);
+  line-height: 1;
+  margin: 0.4rem 0 0;
+}
+
+.login-strip,
+.toolbar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.input {
+  border: 1px solid #2b2b2b;
+  background: #fffaf0;
+  padding: 0.65rem 0.75rem;
+  min-height: 40px;
+}
+
+.button {
+  border: 1px solid #191919;
+  background: #191919;
+  color: #f7f2e8;
+  padding: 0.65rem 0.85rem;
+  min-height: 40px;
+}
+
+.button.secondary {
+  background: #f7f2e8;
+  color: #191919;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+}
+
+.stat {
+  border-top: 4px solid #d94a38;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 0.9rem;
+}
+
+.stat strong {
+  display: block;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.admin-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.table th,
+.table td {
+  border-top: 1px solid #d8d0c2;
+  padding: 0.55rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  color: #555;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.badge {
+  display: inline-block;
+  border: 1px solid #2b2b2b;
+  padding: 0.15rem 0.35rem;
+  background: #fffaf0;
+  font-size: 0.75rem;
+}
+
+.feedback {
+  color: #d94a38;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@media (max-width: 840px) {
+  .home-hero,
+  .home-grid,
+  .admin-sections,
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }

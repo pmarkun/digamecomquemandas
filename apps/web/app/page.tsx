@@ -2,25 +2,51 @@ import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <main style={{ fontFamily: 'Georgia, serif', background: '#F7F2E8', minHeight: '100vh', padding: '2rem', color: '#191919' }}>
-      <h1 style={{ marginBottom: '0.5rem' }}>Quem Tá Na Foto? (diga-me)</h1>
-      <p style={{ maxWidth: 760 }}>
-        Extensão para mapear possíveis identificações de figuras públicas em portais de notícias autorizados.
-        Todo resultado é apresentado como <strong>possível identificação</strong>.
-      </p>
-      <section style={{ marginTop: '1rem', border: '1px solid #2B2B2B', padding: '1rem', background: '#fff' }}>
-        <h2>Como funciona</h2>
-        <ol>
-          <li>Abra a página em portal permitido com a extensão ativa.</li>
-          <li>A página coleta imagens candidatas e consulta o backend.</li>
-          <li>Possíveis identificações aparecem em overlay discreto.</li>
-          <li>Use a página pública para revisar aparições e coaparições.</li>
-        </ol>
-      </section>
-      <div style={{ marginTop: '1rem' }}>
-        <Link href="/admin">Ir para painel admin</Link>
+    <main className="shell">
+      <header className="topbar">
+        <Link className="brand" href="/">Diga-me</Link>
+        <nav className="navline">
+          <Link href="/admin">Admin</Link>
+          <a href="chrome://extensions">Extensão</a>
+        </nav>
+      </header>
+
+      <div className="page">
+        <section className="home-hero">
+          <div>
+            <p className="kicker">Arquivo civil de aparições públicas</p>
+            <h1 className="home-title">Diga-me com quem tu andas</h1>
+            <p className="lede">
+              Uma ferramenta jornalística para registrar possíveis identificações de figuras públicas em imagens de
+              notícias, sempre com aviso de incerteza, contestação visível e curadoria humana.
+            </p>
+          </div>
+          <aside className="notice-box">
+            <strong>Reconhecimento automatizado pode errar.</strong>
+            <p>
+              O MVP só opera em domínios autorizados e compara imagens contra uma base curada de pessoas públicas.
+            </p>
+          </aside>
+        </section>
+
+        <section className="home-grid">
+          <article className="panel">
+            <p className="eyebrow">Fluxo</p>
+            <h2>Extensão</h2>
+            <p>Detecta imagens candidatas em portais permitidos e exibe marcadores discretos sobre faces analisadas.</p>
+          </article>
+          <article className="panel">
+            <p className="eyebrow">Consulta</p>
+            <h2>Perfis</h2>
+            <p>Reúne aparições, coaparições, status do perfil e caminho claro para contestação ou opt-out.</p>
+          </article>
+          <article className="panel">
+            <p className="eyebrow">Curadoria</p>
+            <h2>Painel admin</h2>
+            <p>Revisa matches, sugestões manuais, pessoas públicas, allowlist e pedidos de contestação.</p>
+          </article>
+        </section>
       </div>
-      <p style={{ marginTop: '1rem', color: '#D94A38' }}>Identificação automatizada pode conter erros.</p>
     </main>
   );
 }

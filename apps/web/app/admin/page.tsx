@@ -157,111 +157,172 @@ export default function AdminPage() {
   };
 
   return (
-    <main style={{ padding: '2rem', background: '#F7F2E8', color: '#191919' }}>
-      <h1>Admin</h1>
-      <p>Esta página exige login simples para ações administrativas no MVP.</p>
+    <main className="shell">
+      <header className="topbar">
+        <a className="brand" href="/">Diga-me</a>
+        <nav className="navline">
+          <a href="/">Home</a>
+          <a href="/admin">Admin</a>
+        </nav>
+      </header>
+
+      <div className="page">
+        <section className="admin-header">
+          <div>
+            <p className="eyebrow">Painel de curadoria</p>
+            <h1 className="admin-title">Admin</h1>
+          </div>
+          {logged && (
+            <div className="toolbar">
+              <button className="button" type="button" onClick={addPerson}>Adicionar pessoa</button>
+            </div>
+          )}
+        </section>
+
       {!logged && (
-        <form onSubmit={login} style={{ marginBottom: '1rem' }}>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" />
+        <form className="login-strip panel" onSubmit={login}>
+          <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" />
           <input
+            className="input"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="senha"
           />
-          <button type="submit">Login</button>
+          <button className="button" type="submit">Entrar</button>
         </form>
       )}
-      {feedback && <p>{feedback}</p>}
+      {feedback && <p className="feedback">{feedback}</p>}
       {logged && (
-        <div>
-          <button type="button" onClick={addPerson}>Adicionar pessoa</button>
-          <h2>Allowlist de domínios</h2>
-          <form onSubmit={addAllowedDomain} style={{ marginBottom: '1rem' }}>
+        <>
+          <section className="dashboard-grid">
+            <div className="stat"><strong>{people.length}</strong><span>Pessoas</span></div>
+            <div className="stat"><strong>{matches.length}</strong><span>Matches</span></div>
+            <div className="stat"><strong>{suggestions.length}</strong><span>Sugestões</span></div>
+            <div className="stat"><strong>{optouts.length}</strong><span>Pedidos</span></div>
+          </section>
+
+          <div className="admin-sections">
+          <section className="panel">
+          <h2>Allowlist</h2>
+          <form className="toolbar" onSubmit={addAllowedDomain}>
             <input
+              className="input"
               value={newDomain}
               onChange={(event) => setNewDomain(event.target.value)}
               placeholder="g1.globo.com"
             />
-            <button type="submit">Adicionar domínio</button>
+            <button className="button secondary" type="submit">Adicionar</button>
           </form>
           {allowedDomains.length === 0 && <p>Nenhum domínio liberado.</p>}
-          <ul>
+          <table className="table">
+            <tbody>
             {allowedDomains.map((item) => (
-              <li key={item.id}>
-                {item.domain} — {item.enabled ? 'ativo' : 'desativado'}
-              </li>
+              <tr key={item.id}>
+                <td>{item.domain}</td>
+                <td><span className="badge">{item.enabled ? 'ativo' : 'desativado'}</span></td>
+              </tr>
             ))}
-          </ul>
+            </tbody>
+          </table>
+          </section>
 
+          <section className="panel">
           <h2>Pessoas</h2>
-          <ul>
+          <table className="table">
+            <thead><tr><th>Nome</th><th>Slug</th><th>Status</th><th>Ação</th></tr></thead>
+            <tbody>
             {people.map((item) => (
-              <li key={item.id}>
-                {item.name} ({item.slug}) — {item.status}
-                <div>
-                  <button type="button" onClick={() => optoutPerson(item.id)}>Aplicar opt-out</button>
-                </div>
-              </li>
+              <tr key={item.id}>
+                <td>{item.name}</td>
+                <td>{item.slug}</td>
+                <td><span className="badge">{item.status}</span></td>
+                <td><button className="button secondary" type="button" onClick={() => optoutPerson(item.id)}>Opt-out</button></td>
+              </tr>
             ))}
-          </ul>
+            </tbody>
+          </table>
+          </section>
 
+          <section className="panel wide">
           <h2>Sugestões</h2>
           {suggestions.length === 0 && <p>Nenhuma sugestão encontrada.</p>}
-          <ul>
+          <table className="table">
+            <thead><tr><th>Nome sugerido</th><th>Comentário</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>
             {suggestions.map((item) => (
-              <li key={item.id}>
-                <strong>{item.suggested_name}</strong> — {item.status}
-                <br />
-                {item.comment || ''}
-                <div>
-                  <button type="button" onClick={() => reviewSuggestion(item.id, 'APPROVED')}>Aprovar</button>{' '}
-                  <button type="button" onClick={() => reviewSuggestion(item.id, 'REJECTED')}>Rejeitar</button>
-                </div>
-              </li>
+              <tr key={item.id}>
+                <td><strong>{item.suggested_name}</strong></td>
+                <td>{item.comment || '-'}</td>
+                <td><span className="badge">{item.status}</span></td>
+                <td>
+                  <button className="button secondary" type="button" onClick={() => reviewSuggestion(item.id, 'APPROVED')}>Aprovar</button>{' '}
+                  <button className="button secondary" type="button" onClick={() => reviewSuggestion(item.id, 'REJECTED')}>Rejeitar</button>
+                </td>
+              </tr>
             ))}
-          </ul>
+            </tbody>
+          </table>
+          </section>
 
+          <section className="panel wide">
           <h2>Matches</h2>
           {matches.length === 0 && <p>Nenhum match encontrado.</p>}
-          <ul>
+          <table className="table">
+            <thead><tr><th>Face</th><th>Pessoa</th><th>Score</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>
             {matches.map((item) => (
-              <li key={item.id}>
-                Face {item.detected_face_id} ↦ pessoa {item.person_id} | score {item.score.toFixed(3)} | {item.status}
-                <div>
-                  <button type="button" onClick={() => reviewMatch(item.id, 'APPROVED')}>Aprovar</button>{' '}
-                  <button type="button" onClick={() => reviewMatch(item.id, 'REJECTED')}>Rejeitar</button>
-                </div>
-              </li>
+              <tr key={item.id}>
+                <td>{item.detected_face_id.slice(0, 8)}</td>
+                <td>{item.person_id.slice(0, 8)}</td>
+                <td>{item.score.toFixed(3)}</td>
+                <td><span className="badge">{item.status}</span></td>
+                <td>
+                  <button className="button secondary" type="button" onClick={() => reviewMatch(item.id, 'APPROVED')}>Aprovar</button>{' '}
+                  <button className="button secondary" type="button" onClick={() => reviewMatch(item.id, 'REJECTED')}>Rejeitar</button>
+                </td>
+              </tr>
             ))}
-          </ul>
+            </tbody>
+          </table>
+          </section>
 
+          <section className="panel">
           <h2>Pedidos de opt-out</h2>
           {optouts.length === 0 && <p>Nenhum pedido de opt-out.</p>}
-          <ul>
+          <table className="table">
+            <tbody>
             {optouts.map((item) => (
-              <li key={item.id}>
-                {item.requester_name} ({item.requester_email}) — {item.verification_status}
-                {item.decision ? ` — decisão: ${item.decision}` : ''}
-              </li>
+              <tr key={item.id}>
+                <td>{item.requester_name}<br />{item.requester_email}</td>
+                <td><span className="badge">{item.verification_status}</span></td>
+                <td>{item.decision || '-'}</td>
+              </tr>
             ))}
-          </ul>
+            </tbody>
+          </table>
+          </section>
 
+          <section className="panel">
           <h2>Auditoria</h2>
           {audits.length === 0 && <p>Nenhuma ação administrativa ainda.</p>}
-          <ul>
+          <table className="table">
+            <tbody>
             {audits.map((item) => (
-              <li key={item.id}>
-                {item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : 'sem data'} — {item.actor_type}
-                {' / '}
-                {item.action}
-                {' / '}
-                {item.entity_type}
-              </li>
+              <tr key={item.id}>
+                <td>{item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : 'sem data'}</td>
+                <td>{item.actor_type}</td>
+                <td>{item.action}</td>
+                <td>{item.entity_type}</td>
+              </tr>
             ))}
-          </ul>
-        </div>
+            </tbody>
+          </table>
+          </section>
+          </div>
+        </>
       )}
+      </div>
     </main>
   );
 }
