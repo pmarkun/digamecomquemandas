@@ -14,6 +14,7 @@ type Face = {
     slug: string;
     score: number;
     profile_url?: string;
+    status?: string;
   }>;
 };
 
@@ -76,6 +77,34 @@ function bboxStyle(face: Face, naturalSize: { width: number; height: number }) {
     width: `${Math.max(2, boxWidth)}%`,
     height: `${Math.max(2, boxHeight)}%`,
   };
+}
+
+function topMatch(face: Face) {
+  return face.matches[0] || null;
+}
+
+function faceArea(face: Face) {
+  return Math.max(0, face.bbox.w) * Math.max(0, face.bbox.h);
+}
+
+function confidenceLabel(face: Face) {
+  const match = topMatch(face);
+  return match ? `${Math.round(match.score * 100)}%` : "?";
+}
+
+function faceDisplayName(face: Face, index: number) {
+  const match = topMatch(face);
+  return match ? match.name : `Rosto ${index + 1}`;
+}
+
+function unknownFaceClass(face: Face, minMatchedArea: number | null) {
+  if (face.matches.length > 0) {
+    return "";
+  }
+  if (!minMatchedArea) {
+    return "unknown-prominent";
+  }
+  return faceArea(face) >= minMatchedArea * 0.7 ? "unknown-prominent" : "unknown-subtle";
 }
 
 async function loadFaceModels() {
@@ -167,6 +196,12 @@ export default function HomePage() {
 
   const faces = result?.results[0]?.faces || [];
   const selectedFace = faces.find((face) => face.face_id === selectedFaceId) || faces[0] || null;
+  const minMatchedArea = faces
+    .filter((face) => face.matches.length > 0)
+    .reduce<number | null>((min, face) => {
+      const area = faceArea(face);
+      return min === null ? area : Math.min(min, area);
+    }, null);
   const currentImageSrc = useMemo(() => (submittedUrl ? proxiedImageUrl(submittedUrl) : ''), [submittedUrl]);
 
   useEffect(() => {
@@ -364,11 +399,13 @@ export default function HomePage() {
                     setFeedback('A URL da imagem não carregou pela bancada.');
                   }}
                 />
-                {faces.map((face, index) => (
+                {faces.map((face, index) => {
+                  const match = topMatch(face);
+                  return (
                   <button
                     className={`face-box ${selectedFace?.face_id === face.face_id ? 'active' : ''} ${
                       face.matches.length ? 'matched' : 'unmatched'
-                    }`}
+                    } ${unknownFaceClass(face, minMatchedArea)}`}
                     key={face.face_id}
                     onClick={() => {
                       setSelectedFaceId(face.face_id);
@@ -376,12 +413,13 @@ export default function HomePage() {
                     }}
                     style={bboxStyle(face, naturalSize)}
                     type="button"
-                    title={face.matches.length ? `${face.matches.length} match(es)` : 'Pessoa não identificada'}
+                    title={match ? `${match.name} · ${confidenceLabel(face)}` : 'Pessoa não identificada'}
                   >
-                    <span className="face-index">Face {index + 1}</span>
-                    <span className="face-status">{face.matches.length ? `${face.matches.length} match` : 'sem match'}</span>
+                    <span className="face-index">{match ? match.name : '?'}</span>
+                    <span className="face-status">{confidenceLabel(face)}</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
             {feedback ? <p className="feedback">{feedback}</p> : null}
@@ -400,7 +438,7 @@ export default function HomePage() {
               <>
                 <div className="selected-face-card">
                   <div>
-                    <strong>Face {faces.findIndex((face) => face.face_id === selectedFace.face_id) + 1}</strong>
+                        <strong>{faceDisplayName(selectedFace, faces.findIndex((face) => face.face_id === selectedFace.face_id))}</strong>
                     <p className="muted">
                       {selectedFace.matches.length
                         ? 'Há candidatos automáticos para revisar.'
@@ -458,23 +496,23 @@ export default function HomePage() {
               </p>
             )}
 
-            {faces.length ? (
-              <div className="face-list" aria-label="Faces detectadas">
-                {faces.map((face, index) => (
-                  <button
+                {faces.length ? (
+                  <div className="face-list" aria-label="Faces detectadas">
+                    {faces.map((face, index) => (
+                      <button
                     className={`face-list-button ${selectedFace?.face_id === face.face_id ? 'active' : ''}`}
                     key={face.face_id}
                     onClick={() => {
                       setSelectedFaceId(face.face_id);
                       setSuggestionFeedback('');
-                    }}
-                    type="button"
-                  >
-                    <span>Face {index + 1}</span>
-                    <small>{face.matches.length ? `${face.matches.length} match` : 'sem match'}</small>
-                  </button>
-                ))}
-              </div>
+                        }}
+                        type="button"
+                      >
+                        <span>{faceDisplayName(face, index)}</span>
+                        <small>{face.matches.length ? confidenceLabel(face) : 'sem identificação'}</small>
+                      </button>
+                    ))}
+                  </div>
             ) : null}
           </aside>
         </section>

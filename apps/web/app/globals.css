@@ -469,21 +469,56 @@ button {
   border-color: #d94a38;
 }
 
+.face-box.unknown-prominent {
+  border-style: dashed;
+  background: rgba(217, 74, 56, 0.08);
+}
+
+.face-box.unknown-subtle {
+  border-color: rgba(25, 25, 25, 0.2);
+  border-style: dashed;
+  background: rgba(255, 250, 240, 0.03);
+  opacity: 0.14;
+}
+
+.face-box.unknown-subtle .face-index,
+.face-box.unknown-subtle .face-status {
+  opacity: 0;
+}
+
+.face-box.unknown-subtle:hover,
+.face-box.unknown-subtle:focus-visible,
+.face-box.unknown-subtle.active {
+  opacity: 1;
+}
+
+.face-box.unknown-subtle:hover .face-index,
+.face-box.unknown-subtle:hover .face-status,
+.face-box.unknown-subtle:focus-visible .face-index,
+.face-box.unknown-subtle:focus-visible .face-status,
+.face-box.unknown-subtle.active .face-index,
+.face-box.unknown-subtle.active .face-status {
+  opacity: 1;
+}
+
 .face-index,
 .face-status {
-  align-self: flex-start;
+  align-self: center;
   background: #fffaf0;
   border: 1px solid #191919;
   border-radius: 999px;
   box-shadow: 0 4px 12px rgba(25, 25, 25, 0.16);
-  margin: -0.65rem 0 0 -0.65rem;
+  max-width: calc(100% + 3rem);
+  margin: -0.65rem 0 0;
+  overflow: hidden;
   padding: 0.28rem 0.42rem;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .face-status {
-  align-self: flex-end;
-  margin: 0 -0.65rem -0.65rem 0;
+  align-self: center;
+  margin: 0 0 -0.65rem;
 }
 
 .face-box.matched .face-status {
