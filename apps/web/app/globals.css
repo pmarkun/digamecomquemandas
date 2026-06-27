@@ -259,33 +259,120 @@ button {
   margin-top: 1rem;
 }
 
-.probe-panel {
+.review-shell {
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+.review-topbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin: 0 auto;
+  max-width: 1540px;
+  padding: 0.4rem 0.2rem 1rem;
+}
+
+.review-url-panel {
+  background:
+    radial-gradient(circle at top left, rgba(217, 74, 56, 0.16), transparent 32%),
+    linear-gradient(135deg, #fffaf0 0%, #f4dfbd 100%);
+  border: 1px solid #2b2b2b;
+  border-radius: 28px;
+  box-shadow: 0 24px 70px rgba(42, 31, 18, 0.18);
+  margin: 12vh auto 0;
+  max-width: 860px;
+  padding: clamp(1.25rem, 4vw, 2.5rem);
+  text-align: center;
+}
+
+.review-url-panel.compact {
+  margin-top: 0;
+  max-width: 1540px;
+  padding: 1rem;
+  text-align: left;
+}
+
+.review-url-panel h1 {
+  font-size: clamp(2rem, 5vw, 4.7rem);
+  line-height: 0.95;
+  margin: 0 0 1rem;
+  text-wrap: balance;
+}
+
+.review-url-panel.compact h1 {
+  font-size: clamp(1.35rem, 2.2vw, 2.4rem);
+  margin-bottom: 0.75rem;
+}
+
+.review-url-form {
+  align-items: end;
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(0, 1fr) auto;
   margin-top: 1rem;
 }
 
-.probe-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 0.75rem;
-  align-items: end;
-}
-
-.probe-form label {
+.review-url-form label {
   display: grid;
   gap: 0.35rem;
+  text-align: left;
 }
 
-.probe-result {
+.article-context {
+  margin-top: 0.75rem;
+  text-align: left;
+}
+
+.article-context summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.article-context .input {
+  margin-top: 0.5rem;
+}
+
+.review-workbench {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
   gap: 1rem;
-  margin-top: 1rem;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 420px);
+  margin: 1rem auto 0;
+  max-width: 1540px;
+}
+
+.review-stage-panel {
+  background: #f8ead1;
+  border: 1px solid #2b2b2b;
+  border-radius: 28px;
+  box-shadow: 0 18px 45px rgba(42, 31, 18, 0.14);
+  min-width: 0;
+  padding: 1rem;
+}
+
+.review-stage-header {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+
+.review-stage-header strong {
+  display: block;
+}
+
+.review-canvas {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: min(68vh, 760px);
+  overflow: hidden;
 }
 
 .probe-image-wrap {
   position: relative;
-  display: block;
+  display: inline-block;
   max-width: 100%;
   border: 1px solid #2b2b2b;
   border-radius: 22px;
@@ -298,7 +385,18 @@ button {
 
 .probe-image-wrap img {
   display: block;
-  max-width: none;
+  height: auto;
+  max-height: min(78vh, 900px);
+  max-width: 100%;
+  object-fit: contain;
+  width: auto;
+}
+
+.review-canvas .probe-image-wrap {
+  overflow: visible;
+}
+
+.review-canvas .probe-image-wrap img {
   height: auto;
 }
 
@@ -316,8 +414,8 @@ button {
   font-size: 0.68rem;
   font-weight: 800;
   line-height: 1;
-  min-height: 34px;
-  min-width: 42px;
+  min-height: 0;
+  min-width: 0;
   outline: 1px solid rgba(255, 250, 240, 0.75);
   overflow: visible;
   padding: 0;
@@ -392,6 +490,8 @@ button {
 .correction-panel {
   display: grid;
   gap: 1rem;
+  max-height: calc(100vh - 7rem);
+  overflow: auto;
   position: sticky;
   top: 1rem;
 }
@@ -546,9 +646,29 @@ button {
   .dashboard-grid,
   .form-grid,
   .match-card,
-  .probe-form,
-  .probe-result {
+  .review-url-form,
+  .review-workbench {
     grid-template-columns: 1fr;
+  }
+
+  .review-shell {
+    padding: 0.65rem;
+  }
+
+  .review-url-panel,
+  .review-url-panel.compact {
+    margin-top: 0.5rem;
+  }
+
+  .review-stage-header,
+  .review-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .correction-panel {
+    max-height: none;
+    position: static;
   }
 
   .admin-header {
