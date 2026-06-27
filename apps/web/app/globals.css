@@ -280,6 +280,7 @@ button {
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
   gap: 1rem;
   margin-top: 1rem;
+  align-items: start;
 }
 
 .probe-image-wrap {
@@ -287,8 +288,12 @@ button {
   display: block;
   max-width: 100%;
   border: 1px solid #2b2b2b;
-  background: #fffaf0;
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(25, 25, 25, 0.08), transparent 34%),
+    #fffaf0;
   overflow: auto;
+  box-shadow: 0 18px 45px rgba(42, 31, 18, 0.18);
 }
 
 .probe-image-wrap img {
@@ -299,12 +304,207 @@ button {
 
 .face-box {
   position: absolute;
-  border: 2px solid #d94a38;
-  background: rgba(217, 74, 56, 0.14);
-  color: #191919;
-  font-size: 0.72rem;
-  padding: 0.15rem;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: rgba(255, 247, 230, 0.2);
+  color: #111;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  min-height: 34px;
+  min-width: 42px;
+  outline: 1px solid rgba(255, 250, 240, 0.75);
+  overflow: visible;
+  padding: 0;
+  text-align: left;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+
+.face-box::before {
+  border: 1px solid rgba(255, 250, 240, 0.82);
+  border-radius: 9px;
+  bottom: 3px;
+  content: "";
+  left: 3px;
+  pointer-events: none;
+  position: absolute;
+  right: 3px;
+  top: 3px;
+}
+
+.face-box:hover,
+.face-box:focus-visible {
+  background: rgba(255, 247, 230, 0.34);
+  box-shadow: 0 0 0 4px rgba(22, 105, 122, 0.18);
+  transform: translateY(-1px);
+}
+
+.face-box.active {
+  border-color: #111;
+  box-shadow:
+    0 0 0 4px rgba(255, 250, 240, 0.84),
+    0 0 0 7px rgba(17, 17, 17, 0.28);
+  z-index: 5;
+}
+
+.face-box.matched {
+  border-color: #16697a;
+}
+
+.face-box.unmatched {
+  border-color: #d94a38;
+}
+
+.face-index,
+.face-status {
+  align-self: flex-start;
+  background: #fffaf0;
+  border: 1px solid #191919;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(25, 25, 25, 0.16);
+  margin: -0.65rem 0 0 -0.65rem;
+  padding: 0.28rem 0.42rem;
+  white-space: nowrap;
+}
+
+.face-status {
+  align-self: flex-end;
+  margin: 0 -0.65rem -0.65rem 0;
+}
+
+.face-box.matched .face-status {
+  background: #e0f0ed;
+}
+
+.face-box.unmatched .face-status {
+  background: #ffe3d4;
+}
+
+.correction-panel {
+  display: grid;
+  gap: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.correction-head,
+.selected-face-card,
+.candidate-card,
+.face-list-button {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.correction-head h3 {
+  margin: 0;
+}
+
+.face-count {
+  background: #191919;
+  border-radius: 999px;
+  color: #fffaf0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.4rem 0.65rem;
+  white-space: nowrap;
+}
+
+.selected-face-card {
+  align-items: flex-start;
+  background: #fff4dd;
+  border: 1px solid #2b2b2b;
+  border-radius: 18px;
+  padding: 0.9rem;
+}
+
+.selected-face-card strong {
+  font-size: 1.05rem;
+}
+
+.bbox-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.bbox-chips span {
+  background: #fffaf0;
+  border: 1px solid rgba(25, 25, 25, 0.25);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.24rem 0.44rem;
+}
+
+.candidate-list,
+.correction-form,
+.face-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.candidate-card {
+  background: #fffaf0;
+  border: 1px solid rgba(25, 25, 25, 0.18);
+  border-radius: 16px;
+  padding: 0.75rem;
+}
+
+.correction-form {
+  background: #fffaf0;
+  border: 1px solid rgba(25, 25, 25, 0.18);
+  border-radius: 16px;
+  padding: 0.85rem;
+}
+
+.correction-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.status-line,
+.empty-state {
+  background: #fff4dd;
+  border: 1px dashed rgba(25, 25, 25, 0.32);
+  border-radius: 14px;
+  margin: 0;
+  padding: 0.75rem;
+}
+
+.face-list {
+  border-top: 1px solid rgba(25, 25, 25, 0.14);
+  padding-top: 0.9rem;
+}
+
+.face-list-button {
+  background: #fffaf0;
+  border: 1px solid rgba(25, 25, 25, 0.2);
+  border-radius: 14px;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0.7rem 0.8rem;
+}
+
+.face-list-button.active {
+  background: #191919;
+  color: #fffaf0;
+}
+
+.face-list-button small {
+  opacity: 0.72;
 }
 
 .image-grid {

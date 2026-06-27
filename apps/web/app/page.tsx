@@ -37,15 +37,22 @@ export default function HomePage() {
   const [articleUrl, setArticleUrl] = useState('https://www1.folha.uol.com.br/poder/2026/06/haddad-tera-franca-como-vice-na-disputa-pelo-governo-de-sp-com-tebet-e-marina-para-o-senado.shtml');
   const [imageUrl, setImageUrl] = useState('https://f.i.uol.com.br/fotografia/2026/06/25/17824066766a3d5e1405be2_1782406676_3x2_rt.jpg');
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
+  const [suggestedName, setSuggestedName] = useState('');
+  const [suggestionFeedback, setSuggestionFeedback] = useState('');
   const [feedback, setFeedback] = useState('');
   const [loading, setLoading] = useState(false);
 
   const faces = result?.results[0]?.faces || [];
+  const selectedFace = faces.find((face) => face.face_id === selectedFaceId) || faces[0] || null;
 
   const analyzeImage = async (event: FormEvent) => {
     event.preventDefault();
     setLoading(true);
     setFeedback('');
+    setSuggestionFeedback('');
+    setSuggestedName('');
+    setSelectedFaceId(null);
     setResult(null);
 
     try {
@@ -55,6 +62,7 @@ export default function HomePage() {
         images: [{ image_url: imageUrl }],
       });
       setResult(out);
+      setSelectedFaceId(out.results[0]?.faces[0]?.face_id || null);
       if (out.warnings.length > 0) {
         setFeedback(out.warnings.join(' '));
       }
@@ -62,6 +70,26 @@ export default function HomePage() {
       setFeedback(error instanceof Error ? error.message : 'Falha ao analisar imagem.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const suggestFace = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedFace || !suggestedName.trim()) {
+      setSuggestionFeedback('Selecione uma face e informe um nome para sugerir.');
+      return;
+    }
+
+    setSuggestionFeedback('Enviando sugestão...');
+    try {
+      await api.post(`/extension/faces/${selectedFace.face_id}/suggestions`, {
+        suggested_name: suggestedName.trim(),
+        comment: 'Sugestão criada pela bancada de imagem direta.',
+      });
+      setSuggestionFeedback('Sugestão enviada para curadoria.');
+      setSuggestedName('');
+    } catch (error: unknown) {
+      setSuggestionFeedback(error instanceof Error ? error.message : 'Erro ao enviar sugestão.');
     }
   };
 
@@ -141,10 +169,16 @@ export default function HomePage() {
             <div className="probe-result">
               <div className="probe-image-wrap">
                 <img src={imageUrl} alt="" />
-                {faces.map((face) => (
+                {faces.map((face, index) => (
                   <button
-                    className="face-box"
+                    className={`face-box ${selectedFace?.face_id === face.face_id ? 'active' : ''} ${
+                      face.matches.length ? 'matched' : 'unmatched'
+                    }`}
                     key={face.face_id}
+                    onClick={() => {
+                      setSelectedFaceId(face.face_id);
+                      setSuggestionFeedback('');
+                    }}
                     style={{
                       left: `${face.bbox.x}px`,
                       top: `${face.bbox.y}px`,
@@ -154,34 +188,99 @@ export default function HomePage() {
                     type="button"
                     title={face.matches.length ? `${face.matches.length} match(es)` : 'Pessoa não identificada'}
                   >
-                    {face.matches.length ? `${face.matches.length} match` : 'sem match'}
+                    <span className="face-index">Face {index + 1}</span>
+                    <span className="face-status">{face.matches.length ? `${face.matches.length} match` : 'sem match'}</span>
                   </button>
                 ))}
               </div>
 
-              <div className="panel">
-                <h3>Resultado</h3>
-                <p>{faces.length} face(s) detectada(s)</p>
-                <a href={`/materia/${result.article_id}`}>Abrir matéria no sistema</a>
-                <table className="table">
-                  <tbody>
-                    {faces.map((face) => (
-                      <tr key={face.face_id}>
-                        <td>{face.face_id.slice(0, 8)}</td>
-                        <td>
-                          x {Math.round(face.bbox.x)}, y {Math.round(face.bbox.y)}, w {Math.round(face.bbox.w)}, h{' '}
-                          {Math.round(face.bbox.h)}
-                        </td>
-                        <td>
-                          {face.matches.length === 0
-                            ? 'Pessoa não identificada'
-                            : face.matches.map((match) => `${match.name} ${match.score.toFixed(3)}`).join(', ')}
-                        </td>
-                      </tr>
+              <aside className="panel correction-panel">
+                <div className="correction-head">
+                  <div>
+                    <p className="eyebrow">Curadoria</p>
+                    <h3>Identificar face</h3>
+                  </div>
+                  <span className="face-count">{faces.length} face(s)</span>
+                </div>
+                <p className="muted">
+                  Artigo #{result.article_id} · <a href={`/materia/${result.article_id}`}>abrir matéria no sistema</a>
+                </p>
+
+                {selectedFace ? (
+                  <>
+                    <div className="selected-face-card">
+                      <div>
+                        <strong>
+                          Face {faces.findIndex((face) => face.face_id === selectedFace.face_id) + 1}
+                        </strong>
+                        <p className="muted">
+                          {selectedFace.matches.length
+                            ? 'Há candidatos automáticos para revisar.'
+                            : 'Sem match automático. Sugira uma pessoa para curadoria.'}
+                        </p>
+                      </div>
+                      <div className="bbox-chips" aria-label="Coordenadas da face">
+                        <span>x {Math.round(selectedFace.bbox.x)}</span>
+                        <span>y {Math.round(selectedFace.bbox.y)}</span>
+                        <span>w {Math.round(selectedFace.bbox.w)}</span>
+                        <span>h {Math.round(selectedFace.bbox.h)}</span>
+                      </div>
+                    </div>
+
+                    {selectedFace.matches.length ? (
+                      <div className="candidate-list">
+                        {selectedFace.matches.map((match) => (
+                          <div className="candidate-card" key={match.slug}>
+                            <div>
+                              <strong>{match.name}</strong>
+                              <p className="muted">score {match.score.toFixed(3)}</p>
+                            </div>
+                            {match.profile_url ? <Link href={match.profile_url}>Perfil público</Link> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <form className="correction-form" onSubmit={suggestFace}>
+                        <label>
+                          Nome da pessoa
+                          <input
+                            className="input"
+                            value={suggestedName}
+                            onChange={(event) => setSuggestedName(event.target.value)}
+                            placeholder="Ex.: Fernando Haddad"
+                          />
+                        </label>
+                        <button className="button" type="submit">
+                          Sugerir identificação
+                        </button>
+                      </form>
+                    )}
+
+                    {suggestionFeedback ? <p className="status-line">{suggestionFeedback}</p> : null}
+                  </>
+                ) : (
+                  <p className="empty-state">Nenhuma face detectada nesta imagem.</p>
+                )}
+
+                {faces.length ? (
+                  <div className="face-list" aria-label="Faces detectadas">
+                    {faces.map((face, index) => (
+                      <button
+                        className={`face-list-button ${selectedFace?.face_id === face.face_id ? 'active' : ''}`}
+                        key={face.face_id}
+                        onClick={() => {
+                          setSelectedFaceId(face.face_id);
+                          setSuggestionFeedback('');
+                        }}
+                        type="button"
+                      >
+                        <span>Face {index + 1}</span>
+                        <small>{face.matches.length ? `${face.matches.length} match` : 'sem match'}</small>
+                      </button>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                ) : null}
+              </aside>
             </div>
           )}
         </section>
