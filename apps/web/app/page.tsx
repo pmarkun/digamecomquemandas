@@ -23,6 +23,16 @@ type DetectedFacePayload = {
   w: number;
   h: number;
   score?: number;
+  embedding?: number[];
+  embedding_model?: string;
+};
+
+type PersonOption = {
+  id: string;
+  name: string;
+  display_name?: string;
+  slug: string;
+  status: string;
 };
 
 type AnalyzeResponse = {
@@ -68,55 +78,75 @@ function bboxStyle(face: Face, naturalSize: { width: number; height: number }) {
   };
 }
 
-async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFacePayload[]> {
+async function loadFaceModels() {
   const faceapi = await import('face-api.js');
   if (!faceModelLoad) {
-    faceModelLoad = faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+    faceModelLoad = Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+    ]);
   }
   await faceModelLoad;
+  return faceapi;
+}
 
-  const detections = await faceapi.detectAllFaces(
-    image,
-    new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 }),
-  );
+function facePayloadFromDetection(detection: unknown, image: HTMLImageElement): DetectedFacePayload | null {
   const naturalWidth = image.naturalWidth || 1;
   const naturalHeight = image.naturalHeight || 1;
+  const candidate = detection as {
+    detection?: { box?: { x: number; y: number; width: number; height: number }; score?: number; imageWidth?: number; imageHeight?: number };
+    box?: { x: number; y: number; width: number; height: number };
+    score?: number;
+    imageWidth?: number;
+    imageHeight?: number;
+    descriptor?: Float32Array | number[];
+  };
+  const source = candidate.detection || candidate;
+  const box = source.box;
+  if (!box) {
+    return null;
+  }
 
-  return detections
-    .map((detection: unknown) => {
-      const candidate = detection as {
-        box?: { x: number; y: number; width: number; height: number };
-        score?: number;
-        imageWidth?: number;
-        imageHeight?: number;
-      };
-      const box = candidate.box;
-      if (!box) {
-        return null;
-      }
+  const sourceWidth = source.imageWidth || naturalWidth;
+  const sourceHeight = source.imageHeight || naturalHeight;
+  const scaleX = naturalWidth / sourceWidth;
+  const scaleY = naturalHeight / sourceHeight;
+  const x = Math.max(0, Number(box.x) * scaleX);
+  const y = Math.max(0, Number(box.y) * scaleY);
+  const w = Math.min(Math.max(0, Number(box.width) * scaleX), naturalWidth - x);
+  const h = Math.min(Math.max(0, Number(box.height) * scaleY), naturalHeight - y);
 
-      const sourceWidth = candidate.imageWidth || naturalWidth;
-      const sourceHeight = candidate.imageHeight || naturalHeight;
-      const scaleX = naturalWidth / sourceWidth;
-      const scaleY = naturalHeight / sourceHeight;
-      const x = Math.max(0, Number(box.x) * scaleX);
-      const y = Math.max(0, Number(box.y) * scaleY);
-      const w = Math.min(Math.max(0, Number(box.width) * scaleX), naturalWidth - x);
-      const h = Math.min(Math.max(0, Number(box.height) * scaleY), naturalHeight - y);
+  if (![x, y, w, h].every(Number.isFinite) || w < 18 || h < 18) {
+    return null;
+  }
 
-      if (![x, y, w, h].every(Number.isFinite) || w < 18 || h < 18) {
-        return null;
-      }
+  const descriptor = candidate.descriptor ? Array.from(candidate.descriptor).map(Number) : undefined;
 
-      return {
-        x,
-        y,
-        w,
-        h,
-        score: typeof candidate.score === 'number' ? candidate.score : undefined,
-      };
-    })
-    .filter(Boolean) as DetectedFacePayload[];
+  return {
+    x,
+    y,
+    w,
+    h,
+    score: typeof source.score === 'number' ? source.score : undefined,
+    ...(descriptor?.length === 128 ? { embedding: descriptor, embedding_model: 'face-api.js/faceRecognitionNet' } : {}),
+  };
+}
+
+async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFacePayload[]> {
+  const faceapi = await loadFaceModels();
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+  try {
+    const detections = await faceapi.detectAllFaces(image, options).withFaceLandmarks(true).withFaceDescriptors();
+    return detections
+      .map((detection: unknown) => facePayloadFromDetection(detection, image))
+      .filter(Boolean) as DetectedFacePayload[];
+  } catch (_error: unknown) {
+    const detections = await faceapi.detectAllFaces(image, options);
+    return detections
+      .map((detection: unknown) => facePayloadFromDetection(detection, image))
+      .filter(Boolean) as DetectedFacePayload[];
+  }
 }
 
 export default function HomePage() {
@@ -128,6 +158,7 @@ export default function HomePage() {
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
   const [suggestedName, setSuggestedName] = useState('');
+  const [peopleOptions, setPeopleOptions] = useState<PersonOption[]>([]);
   const [suggestionFeedback, setSuggestionFeedback] = useState('');
   const [feedback, setFeedback] = useState('');
   const [detectorStatus, setDetectorStatus] = useState('Cole uma URL de imagem para começar.');
@@ -228,16 +259,35 @@ export default function HomePage() {
       return;
     }
 
+    const selectedPerson = peopleOptions.find(
+      (person) => (person.display_name || person.name).toLowerCase() === suggestedName.trim().toLowerCase(),
+    );
     setSuggestionFeedback('Enviando sugestão...');
     try {
       await api.post(`/extension/faces/${selectedFace.face_id}/suggestions`, {
         suggested_name: suggestedName.trim(),
+        suggested_person_id: selectedPerson?.id || null,
         comment: 'Sugestão criada pela bancada de imagem direta.',
       });
       setSuggestionFeedback('Sugestão enviada para curadoria.');
       setSuggestedName('');
     } catch (error: unknown) {
       setSuggestionFeedback(error instanceof Error ? error.message : 'Erro ao enviar sugestão.');
+    }
+  };
+
+  const searchPeople = async (value: string) => {
+    setSuggestedName(value);
+    const query = value.trim();
+    if (query.length < 2) {
+      setPeopleOptions([]);
+      return;
+    }
+    try {
+      const rows = await api.get<PersonOption[]>(`/people?query=${encodeURIComponent(query)}`);
+      setPeopleOptions(rows.filter((person) => person.status === 'ACTIVE').slice(0, 8));
+    } catch (_error: unknown) {
+      setPeopleOptions([]);
     }
   };
 
@@ -379,10 +429,16 @@ export default function HomePage() {
                       Nome da pessoa
                       <input
                         className="input"
+                        list="review-people-options"
                         value={suggestedName}
-                        onChange={(event) => setSuggestedName(event.target.value)}
+                        onChange={(event) => void searchPeople(event.target.value)}
                         placeholder="Ex.: Fernando Haddad"
                       />
+                      <datalist id="review-people-options">
+                        {peopleOptions.map((person) => (
+                          <option key={person.id} value={person.display_name || person.name} />
+                        ))}
+                      </datalist>
                     </label>
                     <button className="button" type="submit">
                       Sugerir identificação

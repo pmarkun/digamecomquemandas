@@ -28,6 +28,8 @@ type DetectedFacePayload = {
   w: number;
   h: number;
   score?: number;
+  embedding?: number[];
+  embedding_model?: string;
 };
 
 const state = {
@@ -66,21 +68,26 @@ function matchLink(articleId: string): string {
 
 function loadFaceDetector() {
   if (!faceModelLoad) {
-    faceModelLoad = faceapi.nets.tinyFaceDetector.loadFromUri(chrome.runtime.getURL('models'));
+    faceModelLoad = Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(chrome.runtime.getURL('models')),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri(chrome.runtime.getURL('models')),
+      faceapi.nets.faceRecognitionNet.loadFromUri(chrome.runtime.getURL('models')),
+    ]).then(() => undefined);
   }
   return faceModelLoad;
 }
 
 function bboxFromDetection(detection: any, image: HTMLImageElement): DetectedFacePayload | null {
-  const box = detection?.box;
+  const source = detection?.detection || detection;
+  const box = source?.box;
   if (!box) {
     return null;
   }
 
   const naturalWidth = image.naturalWidth || image.width;
   const naturalHeight = image.naturalHeight || image.height;
-  const sourceWidth = detection.imageWidth || naturalWidth;
-  const sourceHeight = detection.imageHeight || naturalHeight;
+  const sourceWidth = source.imageWidth || naturalWidth;
+  const sourceHeight = source.imageHeight || naturalHeight;
   const scaleX = naturalWidth / (sourceWidth || naturalWidth || 1);
   const scaleY = naturalHeight / (sourceHeight || naturalHeight || 1);
   const x = Math.max(0, Number(box.x) * scaleX);
@@ -97,17 +104,23 @@ function bboxFromDetection(detection: any, image: HTMLImageElement): DetectedFac
     y,
     w: Math.min(w, naturalWidth - x),
     h: Math.min(h, naturalHeight - y),
-    score: typeof detection.score === 'number' ? detection.score : undefined,
+    score: typeof source.score === 'number' ? source.score : undefined,
+    ...(detection?.descriptor?.length === 128
+      ? { embedding: Array.from(detection.descriptor).map(Number), embedding_model: 'face-api.js/faceRecognitionNet' }
+      : {}),
   };
 }
 
 async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFacePayload[] | undefined> {
   try {
     await loadFaceDetector();
-    const detections = await faceapi.detectAllFaces(
-      image,
-      new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }),
-    );
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
+    let detections;
+    try {
+      detections = await faceapi.detectAllFaces(image, options).withFaceLandmarks(true).withFaceDescriptors();
+    } catch (_descriptorError: unknown) {
+      detections = await faceapi.detectAllFaces(image, options);
+    }
 
     return detections
       .map((detection: any) => bboxFromDetection(detection, image))
