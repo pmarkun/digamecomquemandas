@@ -289,7 +289,7 @@ button {
 .review-url-panel.compact {
   margin-top: 0;
   max-width: 1540px;
-  padding: 1rem;
+  padding: 0.75rem;
   text-align: left;
 }
 
@@ -303,6 +303,13 @@ button {
 .review-url-panel.compact h1 {
   font-size: clamp(1.35rem, 2.2vw, 2.4rem);
   margin-bottom: 0.75rem;
+}
+
+.review-url-panel.compact .kicker,
+.review-url-panel.compact h1,
+.review-url-panel.compact .article-context,
+.review-url-panel.compact > .muted {
+  display: none;
 }
 
 .review-url-form {
@@ -347,7 +354,7 @@ button {
   border-radius: 28px;
   box-shadow: 0 18px 45px rgba(42, 31, 18, 0.14);
   min-width: 0;
-  padding: 1rem;
+  padding: clamp(0.45rem, 1.5vw, 1rem);
 }
 
 .review-stage-header {
@@ -652,7 +659,7 @@ button {
   }
 
   .review-shell {
-    padding: 0.65rem;
+    padding: 0.35rem;
   }
 
   .review-url-panel,
