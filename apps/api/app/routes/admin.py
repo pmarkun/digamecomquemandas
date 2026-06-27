@@ -20,8 +20,8 @@ from ..models import (
 )
 from ..schemas import LoginIn, LoginOut, MatchReviewIn, PersonCreate, ReferenceImageIn, ReferenceImageOut
 from ..services.audit import write_action
-from ..services.match import embedding_from_seed
-from ..services.privacy import hash_sha256
+from ..services.image_fetcher import fetch_image
+from ..services.match import embedding_from_image
 
 router = APIRouter(prefix="/admin")
 
@@ -111,8 +111,11 @@ def add_reference_image(person_id: str, payload: ReferenceImageIn, session: Sess
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
 
+    fetched = fetch_image(payload.source_url)
+    embedding = embedding_from_image(payload.source_url, fetched.content)
     ref = PersonReferenceImage(person_id=person.id, source_url=payload.source_url)
-    ref.sha256 = hash_sha256(payload.source_url)
+    ref.sha256 = fetched.sha256
+    ref.phash = fetched.phash
     session.add(ref)
     session.flush()
 
@@ -120,7 +123,8 @@ def add_reference_image(person_id: str, payload: ReferenceImageIn, session: Sess
         FaceEmbedding(
             person_id=person.id,
             reference_image_id=ref.id,
-            embedding=embedding_from_seed(payload.source_url),
+            embedding=embedding,
+            embedding_vector=embedding,
             model_name=payload.model_name,
             model_version=payload.model_version,
         )
