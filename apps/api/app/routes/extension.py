@@ -17,7 +17,8 @@ from ..models import (
     Person,
 )
 from ..services.face_detector import detect_faces
-from ..services.match import embedding_from_seed, match_candidates
+from ..services.image_fetcher import fetch_image
+from ..services.match import embedding_from_image, match_candidates
 from ..services.privacy import hash_sha256, ensure_domain
 from ..services.audit import write_action
 from ..schemas import (
@@ -117,7 +118,8 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
     person_map: dict[str, Person] = {}
 
     for item in payload.images:
-        image_hash = hash_sha256(item.image_url)
+        fetched = fetch_image(item.image_url, item.width, item.height)
+        image_hash = fetched.sha256 or hash_sha256(item.image_url)
         image = session.exec(
             select(ArticleImage).where(
                 and_(ArticleImage.sha256 == image_hash, ArticleImage.article_id == article.id)
@@ -129,8 +131,9 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
                 article_id=article.id,
                 image_url=item.image_url,
                 sha256=image_hash,
-                width=item.width,
-                height=item.height,
+                phash=fetched.phash,
+                width=fetched.width or item.width,
+                height=fetched.height or item.height,
             )
             session.add(image)
             session.flush()
@@ -140,8 +143,11 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
 
         faces_payload: list[FaceOut] = []
         if process_image:
-            for face in detect_faces(item.width, item.height):
-                embed = embedding_from_seed(item.image_url)
+            if not fetched.ok:
+                warnings.append(f"Imagem não baixada; usando metadados enviados: {item.image_url}")
+
+            for face in detect_faces(image.width, image.height):
+                embed = embedding_from_image(item.image_url, fetched.content)
                 detected = DetectedFace(
                     article_image_id=image.id,
                     bbox=vars(face.bbox),

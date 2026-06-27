@@ -16,10 +16,14 @@ def detect_faces(image_width: int | None, image_height: int | None) -> list[Face
     if w < 160 or h < 160:
         return []
 
+    box_size = int(min(w, h) * 0.35)
+    if box_size < 80:
+        return []
+
     box = BBoxLike(
         x=max(10, int(w * 0.25)),
         y=max(10, int(h * 0.2)),
-        w=int(min(w, h) * 0.35),
-        h=int(min(w, h) * 0.35),
+        w=box_size,
+        h=box_size,
     )
     return [FaceCandidate(bbox=box)]

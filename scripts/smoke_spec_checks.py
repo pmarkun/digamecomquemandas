@@ -65,7 +65,7 @@ def check_pgvector_contracts() -> None:
     ok('pgvector.extension', 'CREATE EXTENSION IF NOT EXISTS vector' in db, 'init_db habilita extensão vector')
     ok('pgvector.index', 'vector_cosine_ops' in db, 'init_db cria índice coseno pgvector')
     ok('pgvector.query', '<=>' in matcher and 'CAST(:embedding AS vector)' in matcher, 'matching usa operador vetorial do pgvector')
-    ok('pgvector.seed_vectors', 'embedding_vector=embedding_from_seed' in seed, 'seed preenche embedding_vector')
+    ok('pgvector.seed_vectors', 'embedding_vector=embedding' in seed, 'seed preenche embedding_vector')
 
 
 def check_make_targets() -> None:

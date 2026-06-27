@@ -7,8 +7,8 @@ from sqlmodel import Session, select
 from .config import get_settings
 from .db import engine, init_db
 from .models import AllowedDomain, FaceEmbedding, Person, PersonReferenceImage
-from .services.match import embedding_from_seed
-from .services.privacy import hash_sha256
+from .services.image_fetcher import fetch_image
+from .services.match import embedding_from_image
 
 
 ALLOWED_DOMAINS = [
@@ -54,27 +54,47 @@ def seed_initial_people() -> None:
                 session.flush()
 
             for ref_url in item.get("reference_images", []):
+                fetched = fetch_image(ref_url)
+                embedding = embedding_from_image(ref_url, fetched.content)
                 existing_ref = session.exec(
                     select(PersonReferenceImage).where(
                         PersonReferenceImage.person_id == person.id, PersonReferenceImage.source_url == ref_url
                     )
                 ).first()
                 if existing_ref:
-                    continue
-
-                ref = PersonReferenceImage(person_id=person.id, source_url=ref_url, sha256=hash_sha256(ref_url))
-                session.add(ref)
-                session.flush()
-
-                session.add(
-                    FaceEmbedding(
+                    ref = existing_ref
+                    ref.sha256 = fetched.sha256
+                    ref.phash = fetched.phash
+                    session.add(ref)
+                else:
+                    ref = PersonReferenceImage(
                         person_id=person.id,
-                        reference_image_id=ref.id,
-                        embedding=embedding_from_seed(ref_url),
-                        embedding_vector=embedding_from_seed(ref_url),
-                        model_name="buffalo_l",
-                        model_version="0.1",
+                        source_url=ref_url,
+                        sha256=fetched.sha256,
+                        phash=fetched.phash,
                     )
+                    session.add(ref)
+                    session.flush()
+
+                existing_embedding = session.exec(
+                    select(FaceEmbedding).where(FaceEmbedding.reference_image_id == ref.id)
+                ).first()
+                if existing_embedding:
+                    existing_embedding.embedding = embedding
+                    existing_embedding.embedding_vector = embedding
+                    existing_embedding.model_name = "buffalo_l"
+                    existing_embedding.model_version = "0.1"
+                    session.add(existing_embedding)
+                else:
+                    session.add(
+                        FaceEmbedding(
+                            person_id=person.id,
+                            reference_image_id=ref.id,
+                            embedding=embedding,
+                            embedding_vector=embedding,
+                            model_name="buffalo_l",
+                            model_version="0.1",
+                        )
                 )
 
         session.commit()

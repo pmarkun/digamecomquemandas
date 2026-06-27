@@ -33,6 +33,13 @@ def embedding_from_seed(seed: str, dim: int = DIMENSION) -> List[float]:
     return [v / norm for v in values]
 
 
+def embedding_from_image(image_url: str, content: bytes | None, dim: int = DIMENSION) -> List[float]:
+    if content:
+        digest_seed = sha256(content).hexdigest()
+        return embedding_from_seed(digest_seed, dim=dim)
+    return embedding_from_seed(image_url, dim=dim)
+
+
 def cosine(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
