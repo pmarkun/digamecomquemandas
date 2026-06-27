@@ -151,6 +151,7 @@ async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFac
 
 export default function HomePage() {
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const peopleSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputUrl, setInputUrl] = useState(DEFAULT_IMAGE_URL);
   const [submittedUrl, setSubmittedUrl] = useState('');
   const [articleUrl, setArticleUrl] = useState(DEFAULT_ARTICLE_URL);
@@ -276,19 +277,22 @@ export default function HomePage() {
     }
   };
 
-  const searchPeople = async (value: string) => {
+  const searchPeople = (value: string) => {
     setSuggestedName(value);
     const query = value.trim();
+    if (peopleSearchTimer.current) {
+      clearTimeout(peopleSearchTimer.current);
+    }
     if (query.length < 2) {
       setPeopleOptions([]);
       return;
     }
-    try {
-      const rows = await api.get<PersonOption[]>(`/people?query=${encodeURIComponent(query)}`);
-      setPeopleOptions(rows.filter((person) => person.status === 'ACTIVE').slice(0, 8));
-    } catch (_error: unknown) {
-      setPeopleOptions([]);
-    }
+    peopleSearchTimer.current = setTimeout(() => {
+      api
+        .get<PersonOption[]>(`/people?query=${encodeURIComponent(query)}`)
+        .then((rows) => setPeopleOptions(rows.filter((person) => person.status === 'ACTIVE').slice(0, 8)))
+        .catch(() => setPeopleOptions([]));
+    }, 220);
   };
 
   return (
@@ -431,7 +435,7 @@ export default function HomePage() {
                         className="input"
                         list="review-people-options"
                         value={suggestedName}
-                        onChange={(event) => void searchPeople(event.target.value)}
+                        onChange={(event) => searchPeople(event.target.value)}
                         placeholder="Ex.: Fernando Haddad"
                       />
                       <datalist id="review-people-options">

@@ -35,12 +35,15 @@ def build_app() -> FastAPI:
 
     @app.middleware("http")
     async def simple_rate_limit(request: Request, call_next):
+        if request.method == "OPTIONS" or request.url.path.endswith("/health"):
+            return await call_next(request)
+
         ip = request.client.host if request.client else "unknown"
         now = monotonic()
         bucket: Deque[float] = request_timestamps[ip]
         while bucket and (now - bucket[0]) > 60:
             bucket.popleft()
-        if len(bucket) > 60:
+        if len(bucket) > 240:
             return JSONResponse(status_code=429, content={"detail": "Taxa de requisições excedida."})
         bucket.append(now)
         return await call_next(request)
