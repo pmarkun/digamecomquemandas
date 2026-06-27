@@ -61,7 +61,7 @@ def person_appearances(slug: str, session: Session = Depends(get_session)):
         .where(FaceMatch.person_id == person.id)
     ).all()
 
-    appearances = []
+    appearances_by_image: dict[str, dict] = {}
     for match in matches:
         face = session.get(DetectedFace, match.detected_face_id)
         if not face:
@@ -72,16 +72,17 @@ def person_appearances(slug: str, session: Session = Depends(get_session)):
         article = session.get(Article, image.article_id)
         if not article:
             continue
-        appearances.append(
-            {
+        image_key = str(image.id)
+        existing = appearances_by_image.get(image_key)
+        if existing is None or match.score > existing["score"]:
+            appearances_by_image[image_key] = {
                 "article_id": str(article.id),
-                "image_id": str(image.id),
+                "image_id": image_key,
                 "image_url": image.image_url,
                 "score": match.score,
                 "status": match.status,
             }
-        )
-    return appearances
+    return list(appearances_by_image.values())
 
 
 @router.get("/people/{slug}/connections")
@@ -96,11 +97,11 @@ def person_connections(slug: str, session: Session = Depends(get_session)):
         .where(FaceMatch.person_id == person.id)
     ).all()
 
-    own_image_ids = {
-        session.get(DetectedFace, fid).article_image_id
-        for fid in own
-        if session.get(DetectedFace, fid)
-    }
+    own_image_ids = set()
+    for fid in own:
+        face = session.get(DetectedFace, fid)
+        if face:
+            own_image_ids.add(face.article_image_id)
 
     coappear: dict[str, dict[str, str | int | float | None | dict[str, object]]] = {}
     for image_id in own_image_ids:
@@ -111,14 +112,24 @@ def person_connections(slug: str, session: Session = Depends(get_session)):
         ).all()
         image = session.get(ArticleImage, image_id)
         article = session.get(Article, image.article_id) if image else None
+        best_by_person: dict[str, FaceMatch] = {}
         for f in faces:
             if f.person_id == person.id:
                 continue
             other = session.get(Person, f.person_id)
             if not other:
                 continue
+            other_key = str(other.id)
+            existing_match = best_by_person.get(other_key)
+            if existing_match is None or f.score > existing_match.score:
+                best_by_person[other_key] = f
+
+        for other_key, f in best_by_person.items():
+            other = session.get(Person, f.person_id)
+            if not other:
+                continue
             entry = coappear.get(
-                str(other.id),
+                other_key,
                 {
                     "slug": other.slug,
                     "name": other.name,
@@ -142,7 +153,7 @@ def person_connections(slug: str, session: Session = Depends(get_session)):
                     entry["last_seen"] = seen_at
                     entry["last_article_id"] = str(article.id)
                     entry["last_article_title"] = article.title
-            coappear[str(other.id)] = entry
+            coappear[other_key] = entry
 
     return [
         {
