@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 
 type Person = {
   id: string;
@@ -29,9 +30,12 @@ async function loadAppearances(slug: string) {
 }
 
 export default async function PersonPage({ params }: { params: { slug: string } }) {
-  const person = await loadPerson(params.slug);
+  const person = await loadPerson(params.slug).catch(() => null);
+  if (!person) {
+    notFound();
+  }
   const isOptedOut = person.status === 'OPTOUT_LIMITED' || person.status === 'REMOVED';
-  const appearances = isOptedOut ? [] : await loadAppearances(params.slug);
+  const appearances = isOptedOut ? [] : await loadAppearances(params.slug).catch(() => []);
 
   return (
     <main style={{ padding: '2rem', background: '#F7F2E8', color: '#191919' }}>

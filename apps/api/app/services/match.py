@@ -27,7 +27,8 @@ def embedding_from_seed(seed: str, dim: int = DIMENSION) -> List[float]:
     values: list[float] = []
     for idx in range(dim):
         chunk = digest[idx % len(digest)]
-        mixed = (chunk + digest[(idx * 7) % len(digest)]) / 510.0
+        other = digest[(idx * 7) % len(digest)]
+        mixed = (((chunk ^ other) / 255.0) * 2.0) - 1.0
         values.append(mixed)
     norm = sqrt(sum(v * v for v in values)) or 1.0
     return [v / norm for v in values]

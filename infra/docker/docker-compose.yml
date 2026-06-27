@@ -27,6 +27,9 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/qtnf
       REDIS_URL: redis://redis:6379/0
+      FACE_MATCH_THRESHOLD: "0.94"
+      FACE_DISPLAY_THRESHOLD: "0.97"
+      FACE_AUTO_APPROVE_THRESHOLD: "0.995"
     ports:
       - "8000:8000"
     depends_on:
@@ -42,6 +45,7 @@ services:
       - ../../.env
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+      API_BASE_URL: http://api:8000/api/v1
     ports:
       - "3000:3000"
     depends_on:

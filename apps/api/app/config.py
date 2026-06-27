@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     admin_password: str = "admin"
 
     face_model_name: str = "buffalo_l"
-    face_match_threshold: float = 0.82
-    face_display_threshold: float = 0.86
-    face_auto_approve_threshold: float = 0.92
+    face_match_threshold: float = 0.94
+    face_display_threshold: float = 0.97
+    face_auto_approve_threshold: float = 0.995
     max_matches_per_face: int = 3
 
     store_original_images: bool = False
@@ -47,4 +47,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

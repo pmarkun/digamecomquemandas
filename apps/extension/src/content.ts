@@ -115,40 +115,58 @@ function bindSuggestionForm(popup: HTMLDivElement, faceId: string) {
 function buildOverlay(image: HTMLImageElement, faces: any[], articleId: string) {
   const matches = faces.flatMap((face: any) => face.matches || []);
   const firstFaceId = faces[0]?.face_id || '';
+  const target = image.parentElement?.tagName === 'PICTURE' ? image.parentElement : image;
   const wrapper = document.createElement('div');
   wrapper.style.position = 'relative';
-  wrapper.style.display = 'inline-block';
+  wrapper.style.display = getComputedStyle(target).display === 'block' ? 'block' : 'inline-block';
+  wrapper.style.maxWidth = '100%';
+  wrapper.style.verticalAlign = 'top';
+  wrapper.dataset.qtnfOverlay = 'true';
 
   const badge = document.createElement('div');
   badge.textContent = styleBadge(matches.length);
   badge.style.position = 'absolute';
-  badge.style.left = '0';
-  badge.style.bottom = '0';
-  badge.style.background = 'rgba(255,255,255,0.85)';
+  badge.style.left = '10px';
+  badge.style.bottom = '10px';
+  badge.style.maxWidth = '180px';
+  badge.style.background = 'rgba(247,242,232,0.94)';
   badge.style.color = '#191919';
-  badge.style.fontSize = '11px';
-  badge.style.padding = '2px 6px';
+  badge.style.fontFamily = 'Georgia, serif';
+  badge.style.fontSize = '12px';
+  badge.style.lineHeight = '1.25';
+  badge.style.padding = '5px 7px';
   badge.style.border = '1px solid #2B2B2B';
+  badge.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
   badge.style.zIndex = '2147483647';
 
   const button = document.createElement('button');
   button.textContent = matches.length > 0 ? 'Ver possibilidades' : 'Sugerir identificação';
   button.style.position = 'absolute';
-  button.style.top = '0';
-  button.style.right = '0';
+  button.style.top = '10px';
+  button.style.right = '10px';
+  button.style.background = '#191919';
+  button.style.color = '#F7F2E8';
+  button.style.border = '1px solid #2B2B2B';
+  button.style.padding = '6px 8px';
+  button.style.fontSize = '12px';
+  button.style.cursor = 'pointer';
   button.style.zIndex = '2147483647';
 
   const popup = document.createElement('div');
   popup.style.position = 'absolute';
-  popup.style.top = '18px';
-  popup.style.right = '0';
-  popup.style.padding = '8px';
+  popup.style.top = '44px';
+  popup.style.right = '10px';
+  popup.style.padding = '10px';
   popup.style.display = 'none';
-  popup.style.width = '240px';
-  popup.style.background = '#fff';
+  popup.style.width = '260px';
+  popup.style.maxWidth = 'calc(100% - 20px)';
+  popup.style.background = '#F7F2E8';
   popup.style.color = '#191919';
   popup.style.border = '1px solid #2B2B2B';
+  popup.style.fontFamily = 'Georgia, serif';
   popup.style.fontSize = '12px';
+  popup.style.lineHeight = '1.45';
+  popup.style.boxShadow = '0 8px 24px rgba(0,0,0,0.22)';
   popup.style.zIndex = '2147483650';
 
   button.addEventListener('click', () => {
@@ -177,11 +195,11 @@ function buildOverlay(image: HTMLImageElement, faces: any[], articleId: string) 
     popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
   });
 
-  wrapper.appendChild(image.cloneNode(true));
+  target.parentNode?.insertBefore(wrapper, target);
+  wrapper.appendChild(target);
   wrapper.appendChild(badge);
   wrapper.appendChild(button);
   wrapper.appendChild(popup);
-  image.replaceWith(wrapper);
 }
 
 function parseImages(): CandidateImage[] {
