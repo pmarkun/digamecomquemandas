@@ -53,6 +53,63 @@ Serviços esperados:
 - `localhost:3000` Web
 - `diga-me-worker` em execução contínua
 
+### Deploy Railway
+
+O deploy recomendado no Railway mantém **dois serviços** e um volume persistente:
+
+- `api`: FastAPI, SQLite em volume Railway e Playwright/Chromium para renderizar matérias quando ativado.
+- `web`: Next.js servido separadamente, apontando para a API pública.
+- Volume no serviço `api`: montar em `/data`.
+- Redis não é obrigatório no fluxo atual; o worker usa arquivo/local demo e pode ficar fora do deploy inicial.
+
+Variáveis sugeridas no serviço `api`:
+
+```env
+DATABASE_URL=sqlite:////data/diga-me.sqlite3
+ALLOW_SQLITE_FALLBACK=false
+SEED_ON_STARTUP=true
+ARTICLE_DISCOVERY_BROWSER_ENABLED=true
+ARTICLE_DISCOVERY_MIN_IMAGE_DIMENSION=300
+WEB_BASE_URL=https://SEU-WEB.up.railway.app
+API_BASE_URL=https://SEU-API.up.railway.app
+ADMIN_EMAIL=...
+ADMIN_PASSWORD=...
+FACE_MATCH_THRESHOLD=0.94
+FACE_DISPLAY_THRESHOLD=0.97
+FACE_AUTO_APPROVE_THRESHOLD=0.995
+```
+
+Depois do primeiro boot com seed concluído, troque `SEED_ON_STARTUP=false` para evitar trabalho desnecessário a cada restart.
+
+Variáveis sugeridas no serviço `web`:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=https://SEU-API.up.railway.app/api/v1
+API_BASE_URL=https://SEU-API.up.railway.app/api/v1
+NEXT_PUBLIC_BOOTSTRAP_MIN_IMAGE_DIMENSION=300
+```
+
+Passos via Railway CLI, depois de `railway login` e `railway link`:
+
+```bash
+railway add --service api
+railway add --service web
+railway volume add --service api --mount-path /data
+railway variable set DATABASE_URL=sqlite:////data/diga-me.sqlite3 --service api
+railway variable set ALLOW_SQLITE_FALLBACK=false --service api
+railway variable set SEED_ON_STARTUP=true --service api
+railway variable set ARTICLE_DISCOVERY_BROWSER_ENABLED=true --service api
+railway variable set NEXT_PUBLIC_API_BASE_URL=https://SEU-API.up.railway.app/api/v1 --service web
+railway variable set API_BASE_URL=https://SEU-API.up.railway.app/api/v1 --service web
+```
+
+No dashboard do Railway, configure cada serviço para usar o respectivo Dockerfile:
+
+- `api`: `apps/api/Dockerfile`
+- `web`: `apps/web/Dockerfile`
+
+Como alternativa, conecte os dois serviços ao repositório GitHub e defina o Dockerfile de cada serviço pelo dashboard. O serviço `api` deve ter apenas uma réplica quando estiver usando SQLite em volume.
+
 ### Banco e seed
 
 ```bash
@@ -102,3 +159,4 @@ make seed
 - Embeddings faciais são persistidos em coluna `vector(128)` no PostgreSQL/pgvector e também em JSON para fallback de testes.
 - Worker é modo demo inicial (sem fila/broker real).
 - Renderização server-side de matérias com Chromium/Playwright fica desativada por padrão. Ative com `ARTICLE_DISCOVERY_BROWSER_ENABLED=true` e configure `ARTICLE_DISCOVERY_BROWSER_EXECUTABLE` quando o ambiente não tiver browser gerenciado pelo Playwright.
+- O corte mínimo de dimensão para imagens de matéria é configurável por env: `ARTICLE_DISCOVERY_MIN_IMAGE_DIMENSION=300` na API e `NEXT_PUBLIC_BOOTSTRAP_MIN_IMAGE_DIMENSION=300` na bancada web.

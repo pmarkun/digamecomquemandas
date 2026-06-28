@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 import re
 from typing import Iterable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -209,7 +209,11 @@ def evaluate_image_candidate(
 
     if width and height:
         area = width * height
-        if width < 360 or height < 220 or area < 120_000:
+        settings = get_settings()
+        min_dimension = max(1, settings.article_discovery_min_image_dimension)
+        min_width = max(360, min_dimension)
+        min_height = max(220, min_dimension)
+        if width < min_width or height < min_height or area < 120_000:
             return CandidateEvaluation(score, "small_image")
         if area >= 350_000:
             score += 2.0
@@ -237,13 +241,65 @@ def score_image_candidate(
     return 0 if evaluation.reason else evaluation.score
 
 
+def _image_area(image: DiscoveredImage) -> int:
+    return int(image.width or 0) * int(image.height or 0)
+
+
+def _variant_key(image_url: str) -> str:
+    parsed = urlparse(image_url)
+    path = parsed.path
+    path = re.sub(r"([_-])\d{2,5}x\d{2,5}(?=\.[a-zA-Z0-9]+$)", r"\1SIZE", path)
+    path = re.sub(r"([_-])\d{2,5}(?=\.[a-zA-Z0-9]+$)", r"\1SIZE", path)
+    path = re.sub(r"/(?:w|width|h|height|fit-in|resize)/\d{2,5}(?=/)", "/SIZE", path, flags=re.IGNORECASE)
+    ignored_params = {
+        "w",
+        "width",
+        "h",
+        "height",
+        "resize",
+        "size",
+        "crop",
+        "fit",
+        "quality",
+        "q",
+        "format",
+        "auto",
+        "dpr",
+    }
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in ignored_params
+        ]
+    )
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", query, ""))
+
+
+def _prefer_image_variant(current: DiscoveredImage, candidate: DiscoveredImage) -> DiscoveredImage:
+    current_area = _image_area(current)
+    candidate_area = _image_area(candidate)
+    if candidate_area and candidate_area != current_area:
+        return candidate if candidate_area > current_area else current
+    if candidate.score != current.score:
+        return candidate if candidate.score > current.score else current
+    return candidate if len(candidate.image_url) > len(current.image_url) else current
+
+
 def _dedupe_and_limit(images: Iterable[DiscoveredImage], max_images: int) -> list[DiscoveredImage]:
     by_url: dict[str, DiscoveredImage] = {}
     for image in images:
         existing = by_url.get(image.image_url)
         if existing is None or image.score > existing.score:
             by_url[image.image_url] = image
-    return sorted(by_url.values(), key=lambda item: item.score, reverse=True)[:max_images]
+
+    by_variant: dict[str, DiscoveredImage] = {}
+    for image in by_url.values():
+        key = _variant_key(image.image_url)
+        existing = by_variant.get(key)
+        by_variant[key] = image if existing is None else _prefer_image_variant(existing, image)
+
+    return sorted(by_variant.values(), key=lambda item: (item.score, _image_area(item)), reverse=True)[:max_images]
 
 
 def _dedupe_ignored(images: Iterable[IgnoredImage]) -> list[IgnoredImage]:

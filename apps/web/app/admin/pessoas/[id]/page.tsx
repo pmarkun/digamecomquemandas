@@ -57,6 +57,8 @@ type Detail = {
 };
 
 let faceModelLoad: Promise<unknown> | null = null;
+const APPROVED_MATCH_STATUSES = new Set(['APPROVED', 'APPROVED_MANUAL']);
+const PENDING_MATCH_STATUSES = new Set(['AUTO', 'AUTO_APPROVED']);
 
 function proxiedImageUrl(url: string) {
   return `/api/image-proxy?url=${encodeURIComponent(url)}`;
@@ -163,6 +165,7 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
   const [detectedFaceTargets, setDetectedFaceTargets] = useState<Record<number, string>>({});
   const [modalFeedback, setModalFeedback] = useState('');
   const [detecting, setDetecting] = useState(false);
+  const [matchTab, setMatchTab] = useState<'approved' | 'pending'>('approved');
 
   const headersFor = (authToken = token) => ({ Authorization: `Bearer ${authToken}` });
 
@@ -206,6 +209,15 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
     await api.post(`/admin/people/${params.id}/reference-images`, { source_url: referenceUrl.trim() }, headersFor());
     setReferenceUrl('');
     setFeedback('Imagem de referência adicionada.');
+    await loadDetail();
+  };
+
+  const deleteReference = async (reference: ReferenceImage) => {
+    if (!confirm(`Excluir esta foto de referência de ${detail?.person.display_name || 'pessoa'}?`)) {
+      return;
+    }
+    await api.post(`/admin/people/${params.id}/reference-images/${reference.id}/delete`, {}, headersFor());
+    setFeedback('Foto de referência excluída.');
     await loadDetail();
   };
 
@@ -314,6 +326,10 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
     return <main className="shell"><div className="page"><p className="feedback">{feedback || 'Carregando...'}</p></div></main>;
   }
 
+  const approvedMatches = detail.matches.filter((match) => APPROVED_MATCH_STATUSES.has(match.status));
+  const pendingMatches = detail.matches.filter((match) => PENDING_MATCH_STATUSES.has(match.status));
+  const visibleMatches = matchTab === 'approved' ? approvedMatches : pendingMatches;
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -367,7 +383,10 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
               {detail.reference_images.map((item) => (
                 <article className="thumb-card" key={item.id}>
                   <img src={item.source_url} alt="" />
-                  <span className="badge">{item.status}</span>
+                  <div className="toolbar split">
+                    <span className="badge">{item.status}</span>
+                    <button className="button secondary compact" type="button" onClick={() => deleteReference(item)}>Excluir</button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -375,8 +394,16 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
 
           <section className="panel wide">
             <h2>Matérias e faces associadas</h2>
+            <div className="admin-tabs two-tabs" role="tablist" aria-label="Filtro de faces associadas">
+              <button className={matchTab === 'approved' ? 'active' : ''} type="button" onClick={() => setMatchTab('approved')}>
+                Aprovadas <strong>{approvedMatches.length}</strong>
+              </button>
+              <button className={matchTab === 'pending' ? 'active' : ''} type="button" onClick={() => setMatchTab('pending')}>
+                Pendentes <strong>{pendingMatches.length}</strong>
+              </button>
+            </div>
             <div className="match-grid">
-              {detail.matches.map((match) => (
+              {visibleMatches.map((match) => (
                 <article className="match-card" key={match.id}>
                   {match.image_url && (
                     <button className="image-open-button" type="button" onClick={() => openImageModal(match)}>
@@ -410,7 +437,9 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
                   </div>
                 </article>
               ))}
-              {detail.matches.length === 0 && <p>Nenhuma face associada ainda.</p>}
+              {visibleMatches.length === 0 && (
+                <p>Nenhuma face {matchTab === 'approved' ? 'aprovada' : 'pendente'} associada.</p>
+              )}
             </div>
           </section>
         </div>

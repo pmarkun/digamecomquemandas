@@ -58,6 +58,10 @@ def build_app() -> FastAPI:
     @app.on_event("startup")
     def startup() -> None:
         init_db()
+        if settings.seed_on_startup:
+            from .seed import seed_initial_people
+
+            seed_initial_people()
 
     @app.get("/")
     def root() -> dict[str, str]:

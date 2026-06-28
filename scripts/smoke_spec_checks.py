@@ -34,7 +34,8 @@ def check_routes(path: str, routes: list[str], prefix: str = '') -> None:
 def check_admin_routes() -> None:
     text = (ROOT / 'apps/api/app/routes/admin.py').read_text(encoding='utf-8')
     for route in [
-        '/login', '/people', '/people/{person_id}/reference-images', '/matches/{match_id}/review',
+        '/login', '/people', '/people/{person_id}/reference-images',
+        '/people/{person_id}/reference-images/{reference_image_id}/delete', '/matches/{match_id}/review',
         '/suggestions/{suggestion_id}/review', '/people/{person_id}/optout',
         '/suggestions', '/matches', '/optout-requests', '/audit-logs', '/allowed-domains',
         '/people/{person_id}/article-images/{image_id}/discard', '/article-images/{image_id}/faces',
@@ -121,6 +122,8 @@ def check_frontend_contracts() -> None:
     ok('web.admin.per_match_reassign', 'reassignTargets' in admin_detail and 'Mover face' in admin_detail, 'reatribuição de face é contextual por match')
     ok('web.admin.person_back_button', 'Voltar ao admin' in admin_detail, 'edição de pessoa tem botão de voltar')
     ok('web.admin.discard_person_image', 'Descartar imagem deste perfil' in admin_detail and '/discard' in admin_detail, 'admin pode descartar só a imagem do perfil')
+    ok('web.admin.delete_reference_image', 'deleteReference' in admin_detail and '/reference-images/${reference.id}/delete' in admin_detail, 'admin pode excluir foto de referência')
+    ok('web.admin.person_match_tabs', 'Aprovadas' in admin_detail and 'Pendentes' in admin_detail and 'approvedMatches' in admin_detail and 'pendingMatches' in admin_detail, 'edição de pessoa mostra abas de faces aprovadas e pendentes')
     ok('web.admin.image_face_detector', 'Detectar faces' in admin_detail and '/article-images/${activeImageMatch.image_id}/faces' in admin_detail, 'imagem ampliada permite detectar e salvar faces')
     ok('web.admin.bootstrap_link', '/admin/bootstrap' in admin_page, 'admin aponta para bancada de bootstrap')
     ok('web.admin.bootstrap_page', 'Nomeação em lote' in bootstrap_page and 'processRun' in bootstrap_page, 'bancada de bootstrap existe')
@@ -128,6 +131,9 @@ def check_frontend_contracts() -> None:
     ok('web.admin.bootstrap_group_label', '/label-group' in bootstrap_page and 'Nomear grupo' in bootstrap_page, 'bootstrap permite nomear grupo de faces')
     ok('web.admin.bootstrap_article_deck', 'bootstrap-review-deck' in bootstrap_page and 'ArrowLeft' in bootstrap_page and 'ArrowRight' in bootstrap_page, 'bootstrap revisa uma matéria por vez com navegação')
     ok('web.admin.bootstrap_face_actions', '/faces/${face.face_id}/assign' in bootstrap_page and 'reviewMatch(primaryMatch.id' in bootstrap_page, 'bootstrap permite aprovar, rejeitar e atribuir faces')
+    ok('web.admin.bootstrap_ignore_image', 'Ignorar imagem' in bootstrap_page and '/article-images/${image.image_id}/ignore' in bootstrap_page, 'bootstrap permite ignorar imagem inteira')
+    ok('web.admin.bootstrap_dedupes_image_variants', 'dedupeImageVariants' in bootstrap_page and 'imageVariantKey' in bootstrap_page, 'bootstrap ignora variantes menores da mesma imagem')
+    ok('web.admin.bootstrap_min_dimension_env', 'NEXT_PUBLIC_BOOTSTRAP_MIN_IMAGE_DIMENSION' in bootstrap_page and 'isTooSmallForBootstrap' in bootstrap_page, 'bootstrap filtra imagens pequenas por env')
     profile_page = (ROOT / 'apps/web/app/pessoa/[slug]/page.tsx').read_text(encoding='utf-8')
     connections_page = (ROOT / 'apps/web/app/pessoa/[slug]/conexoes/page.tsx').read_text(encoding='utf-8')
     contest_page = (ROOT / 'apps/web/app/pessoa/[slug]/contestar/page.tsx').read_text(encoding='utf-8')
@@ -149,6 +155,8 @@ def check_frontend_contracts() -> None:
     bootstrap_service = (ROOT / 'apps/api/app/services/bootstrap_discovery.py').read_text(encoding='utf-8')
     portal_templates = (ROOT / 'apps/api/app/services/portal_templates.py').read_text(encoding='utf-8')
     ok('api.admin.enriched_queues', '_match_payload' in admin_routes and '_suggestion_payload' in admin_routes and 'image_width' in admin_routes, 'filas admin retornam contexto de imagem/matéria')
+    ok('api.admin.delete_reference_image', 'delete_reference_image' in admin_routes and 'session.delete(ref)' in admin_routes, 'API permite excluir foto de referência')
+    ok('api.admin.person_matches_hide_rejected', 'FaceMatch.status.in_(ACTIVE_MATCH_STATUS)' in admin_routes and 'delete_rejected_match' in admin_routes, 'admin remove matches rejeitados da base operacional')
     ok('api.admin.slug_normalizes_accents', 'unicodedata.normalize' in admin_routes and '_slugify(suggestion.suggested_name)' in admin_routes, 'slug de sugestão remove acentos')
     ok('api.admin.bootstrap_models', 'class BootstrapRun' in models and 'class BootstrapRunArticle' in models, 'bootstrap persiste run e matérias')
     ok('api.admin.bootstrap_sources', 'POLITICS_SOURCES' in portal_templates and 'g1.globo.com' in portal_templates and 'www1.folha.uol.com.br' in portal_templates, 'bootstrap declara fontes políticas')
@@ -166,6 +174,7 @@ def check_frontend_contracts() -> None:
     ok('api.admin.bootstrap_groups_ignore_low_auto', 'FaceMatch.score >= settings.face_display_threshold' in admin_routes and 'APPROVED_MANUAL' in admin_routes, 'agrupamento ignora AUTO abaixo do threshold visível')
     ok('api.admin.bootstrap_label_promotes', 'label_bootstrap_group' in admin_routes and 'promote_face_reference' in admin_routes and 'APPROVED_MANUAL' in admin_routes, 'nomear grupo aprova e promove referência')
     ok('api.admin.bootstrap_assign_face', 'assign_bootstrap_face' in admin_routes and '/bootstrap-runs/{run_id}/faces/{face_id}/assign' in admin_routes, 'bootstrap tem endpoint para atribuir face individual')
+    ok('api.admin.bootstrap_ignore_image', 'ignore_bootstrap_image' in admin_routes and '/bootstrap-runs/{run_id}/article-images/{image_id}/ignore' in admin_routes and 'image.status = "IGNORED"' in admin_routes, 'bootstrap tem endpoint para ignorar imagem inteira')
 
 
 def check_extension_contracts() -> None:
@@ -177,6 +186,7 @@ def check_extension_contracts() -> None:
     schemas = (ROOT / 'apps/api/app/schemas.py').read_text(encoding='utf-8')
     extension_routes = (ROOT / 'apps/api/app/routes/extension.py').read_text(encoding='utf-8')
     discovery_service = (ROOT / 'apps/api/app/services/article_image_discovery.py').read_text(encoding='utf-8')
+    api_config = (ROOT / 'apps/api/app/config.py').read_text(encoding='utf-8')
     api_pyproject = (ROOT / 'apps/api/pyproject.toml').read_text(encoding='utf-8')
     face_detector = (ROOT / 'apps/api/app/services/face_detector.py').read_text(encoding='utf-8')
     web_home = (ROOT / 'apps/web/app/page.tsx').read_text(encoding='utf-8')
@@ -221,7 +231,8 @@ def check_extension_contracts() -> None:
     ok('article_discovery.heuristics', 'BLOCKED_IMAGE_HINTS' in discovery_service and 'ARTICLE_IMAGE_HINTS' in discovery_service, 'serviço filtra logos e prioriza imagens jornalísticas')
     ok('article_discovery.browser_optional', 'discover_article_images_browser' in discovery_service and 'playwright.sync_api' in discovery_service, 'serviço suporta renderização opcional com navegador')
     ok('web.article_url_input', '/extension/discover-article-images' in web_home and 'isLikelyImageUrl' in web_home, 'bancada web aceita URL de matéria automaticamente')
-    ok('article_discovery.small_images', 'width < 360' in discovery_service and 'small_image' in discovery_service, 'crawler ignora thumbnails pequenas')
+    ok('article_discovery.small_images', 'article_discovery_min_image_dimension' in api_config and 'min_dimension' in discovery_service and 'small_image' in discovery_service, 'crawler ignora thumbnails pequenas com limiar configurável')
+    ok('article_discovery.image_variant_dedupe', '_variant_key' in discovery_service and '_prefer_image_variant' in discovery_service, 'crawler prefere maior variante da mesma imagem')
     ok('article_discovery.ignored_debug', 'ignored_images' in schemas and 'payload.debug' in extension_routes, 'API retorna imagens ignoradas só em debug')
     ok('debug.face_scores', '/extension/debug/faces/{face_id}/people-scores' in extension_routes and 'cosine' in extension_routes, 'API calcula score por face para autocomplete debug')
     ok('web.debug_toggle', 'Debug' in web_home and 'debugEnabled' in web_home and 'debug-panel' in web_home, 'home tem modo debug')

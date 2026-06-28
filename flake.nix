@@ -22,6 +22,7 @@
         packages = with pkgs; [
           bash
           cacert
+          chromium
           coreutils
           docker
           docker-compose
@@ -41,6 +42,7 @@
           export PNPM_HOME="$DIGA_ME_REPO_ROOT/${cacheBase}/pnpm"
           export PNPM_STORE_DIR="$DIGA_ME_REPO_ROOT/${cacheBase}/pnpm/store"
           export XDG_DATA_HOME="$DIGA_ME_REPO_ROOT/${cacheBase}/xdg"
+          export ARTICLE_DISCOVERY_BROWSER_EXECUTABLE="''${ARTICLE_DISCOVERY_BROWSER_EXECUTABLE:-${pkgs.chromium}/bin/chromium}"
           mkdir -p "$UV_CACHE_DIR" "$PNPM_HOME" "$PNPM_STORE_DIR" "$XDG_DATA_HOME"
 
           if [ ! -f .env ] && [ -f .env.example ]; then

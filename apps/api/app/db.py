@@ -20,6 +20,9 @@ def make_engine() -> object:
     url = _normalize_url(settings.database_url)
 
     if url.startswith("sqlite:"):
+        db_path = url.removeprefix("sqlite:///")
+        if db_path and db_path != ":memory:":
+            Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         connect_args = {"check_same_thread": False}
         return create_engine(url, connect_args=connect_args)
 

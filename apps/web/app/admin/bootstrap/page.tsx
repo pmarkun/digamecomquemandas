@@ -126,7 +126,15 @@ type AnalyzeResponse = {
   warnings: string[];
 };
 
+type AnalyzedImagePayload = {
+  image_url: string;
+  width: number | null;
+  height: number | null;
+  faces: DetectedFacePayload[];
+};
+
 let faceModelLoad: Promise<unknown> | null = null;
+const BOOTSTRAP_MIN_IMAGE_DIMENSION = Number(process.env.NEXT_PUBLIC_BOOTSTRAP_MIN_IMAGE_DIMENSION || 300);
 
 function headersFor(token: string) {
   return { Authorization: `Bearer ${token}` };
@@ -215,6 +223,58 @@ async function detectFaces(imageUrl: string): Promise<{ width: number; height: n
       .map((detection) => facePayloadFromDetection(detection, image))
       .filter(Boolean) as DetectedFacePayload[],
   };
+}
+
+function imageArea(image: { width?: number | null; height?: number | null }) {
+  return Number(image.width || 0) * Number(image.height || 0);
+}
+
+function imageVariantKey(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    url.hash = '';
+    for (const key of ['w', 'width', 'h', 'height', 'resize', 'size', 'crop', 'fit', 'quality', 'q', 'format', 'auto', 'dpr']) {
+      url.searchParams.delete(key);
+    }
+    url.pathname = url.pathname
+      .replace(/([_-])\d{2,5}x\d{2,5}(?=\.[a-z0-9]+$)/i, '$1SIZE')
+      .replace(/([_-])\d{2,5}(?=\.[a-z0-9]+$)/i, '$1SIZE')
+      .replace(/\/(?:w|width|h|height|fit-in|resize)\/\d{2,5}(?=\/)/gi, '/SIZE');
+    return url.toString();
+  } catch {
+    return rawUrl.replace(/([_-])\d{2,5}x\d{2,5}(?=\.[a-z0-9]+$)/i, '$1SIZE');
+  }
+}
+
+function dedupeImageVariants(images: AnalyzedImagePayload[]) {
+  const byVariant = new Map<string, AnalyzedImagePayload>();
+  let dropped = 0;
+  for (const image of images) {
+    const key = imageVariantKey(image.image_url);
+    const current = byVariant.get(key);
+    if (!current) {
+      byVariant.set(key, image);
+      continue;
+    }
+    dropped += 1;
+    const currentArea = imageArea(current);
+    const nextArea = imageArea(image);
+    if (nextArea > currentArea || (nextArea === currentArea && image.image_url.length > current.image_url.length)) {
+      byVariant.set(key, image);
+    }
+  }
+  return { images: Array.from(byVariant.values()), dropped };
+}
+
+function isTooSmallForBootstrap(image: { width?: number | null; height?: number | null }) {
+  const minDimension = bootstrapMinImageDimension();
+  return Boolean(image.width && image.height && (image.width < minDimension || image.height < minDimension));
+}
+
+function bootstrapMinImageDimension() {
+  return Number.isFinite(BOOTSTRAP_MIN_IMAGE_DIMENSION) && BOOTSTRAP_MIN_IMAGE_DIMENSION > 0
+    ? BOOTSTRAP_MIN_IMAGE_DIMENSION
+    : 300;
 }
 
 function cropStyle(face: BootstrapFace, image: BootstrapImage): CSSProperties {
@@ -339,12 +399,16 @@ export default function BootstrapAdminPage() {
         max_images: 4,
       });
       warnings.push(...(discovery.warnings || []));
-      const analyzedImages = [];
+      const detectedImages: AnalyzedImagePayload[] = [];
       for (const image of discovery.images) {
         try {
           const detected = await detectFaces(image.image_url);
+          if (isTooSmallForBootstrap(detected)) {
+            warnings.push(`Imagem ignorada: menor que ${bootstrapMinImageDimension()}px (${detected.width} × ${detected.height}).`);
+            continue;
+          }
           if (detected.faces.length > 0) {
-            analyzedImages.push({
+            detectedImages.push({
               image_url: image.image_url,
               width: detected.width || image.width || null,
               height: detected.height || image.height || null,
@@ -354,6 +418,10 @@ export default function BootstrapAdminPage() {
         } catch (error: unknown) {
           warnings.push(`Imagem ignorada: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
         }
+      }
+      const { images: analyzedImages, dropped } = dedupeImageVariants(detectedImages);
+      if (dropped > 0) {
+        warnings.push(`${dropped} variante(s) menor(es) da mesma imagem ignorada(s).`);
       }
 
       if (analyzedImages.length === 0) {
@@ -438,6 +506,13 @@ export default function BootstrapAdminPage() {
     );
     setGroupNames((current) => ({ ...current, [face.face_id]: '' }));
     setFeedback(`Face atribuída a ${value}.`);
+    await loadRun(run.id);
+  };
+
+  const ignoreImage = async (image: BootstrapImage) => {
+    if (!run) return;
+    await api.post(`/admin/bootstrap-runs/${run.id}/article-images/${image.image_id}/ignore`, {}, headersFor(token));
+    setFeedback('Imagem ignorada neste run.');
     await loadRun(run.id);
   };
 
@@ -575,6 +650,13 @@ export default function BootstrapAdminPage() {
                               <img src={image.image_url} alt="" />
                             </a>
                             <div className="bootstrap-face-review-list">
+                              <div className="toolbar split">
+                                <div>
+                                  <strong>{image.faces.length} face(s)</strong>
+                                  <p className="muted">{image.width || '?'} × {image.height || '?'} · {image.status}</p>
+                                </div>
+                                <button className="button secondary compact" type="button" onClick={() => ignoreImage(image)}>Ignorar imagem</button>
+                              </div>
                               {image.faces.length === 0 && <p className="muted">Imagem sem faces persistidas.</p>}
                               {image.faces.map((face) => {
                                 const fieldId = `face-person-${face.face_id}`;

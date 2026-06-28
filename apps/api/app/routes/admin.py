@@ -309,6 +309,58 @@ def assign_bootstrap_face(
     return {"ok": True, "person_id": str(person.id), "face_id": str(face.id)}
 
 
+@router.post("/bootstrap-runs/{run_id}/article-images/{image_id}/ignore")
+def ignore_bootstrap_image(
+    run_id: str,
+    image_id: str,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    run = session.get(BootstrapRun, _as_uuid(run_id))
+    image = session.get(ArticleImage, _as_uuid(image_id))
+    if not run or not image:
+        raise HTTPException(status_code=404, detail="Run ou imagem não encontrado")
+
+    linked = session.exec(
+        select(BootstrapRunArticle).where(
+            BootstrapRunArticle.run_id == run.id,
+            BootstrapRunArticle.article_id == image.article_id,
+        )
+    ).first()
+    if not linked:
+        raise HTTPException(status_code=404, detail="Imagem não pertence a este run")
+
+    face_ids = [
+        face.id
+        for face in session.exec(
+            select(DetectedFace).where(DetectedFace.article_image_id == image.id)
+        ).all()
+    ]
+    now = datetime.now(timezone.utc)
+    rejected_matches = 0
+    if face_ids:
+        for match in session.exec(select(FaceMatch).where(FaceMatch.detected_face_id.in_(face_ids))).all():
+            if match.status not in {"REJECTED", "HIDDEN_OPTOUT"}:
+                match.status = "REJECTED"
+                match.reviewed_at = now
+                session.add(match)
+                rejected_matches += 1
+
+    image.status = "IGNORED"
+    session.add(image)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="ignore_bootstrap_image",
+        entity_type="article_image",
+        entity_id=image.id,
+        metadata={"run_id": str(run.id), "rejected_matches": rejected_matches},
+    )
+    session.commit()
+    return {"ok": True, "image_id": str(image.id), "status": image.status, "rejected_matches": rejected_matches}
+
+
 def _person_payload(item: Person) -> dict:
     return {
         "id": str(item.id),
@@ -502,6 +554,7 @@ def _bootstrap_article_payload(session: Session, item: BootstrapRunArticle) -> d
         images = session.exec(
             select(ArticleImage)
             .where(ArticleImage.article_id == item.article_id)
+            .where(ArticleImage.status != "IGNORED")
             .order_by(ArticleImage.created_at)
         ).all()
         payload["images"] = [_bootstrap_image_payload(session, image) for image in images]
@@ -557,7 +610,11 @@ def _bootstrap_groups(session: Session, run_id: UUID) -> list[dict]:
     if not article_ids:
         return []
 
-    images = session.exec(select(ArticleImage).where(ArticleImage.article_id.in_(article_ids))).all()
+    images = session.exec(
+        select(ArticleImage)
+        .where(ArticleImage.article_id.in_(article_ids))
+        .where(ArticleImage.status != "IGNORED")
+    ).all()
     image_ids = [image.id for image in images]
     if not image_ids:
         return []
@@ -704,7 +761,11 @@ def get_admin_person(person_id: str, session: Session = Depends(get_session), _:
     reference_images = session.exec(
         select(PersonReferenceImage).where(PersonReferenceImage.person_id == person.id)
     ).all()
-    matches = session.exec(select(FaceMatch).where(FaceMatch.person_id == person.id)).all()
+    matches = session.exec(
+        select(FaceMatch)
+        .where(FaceMatch.person_id == person.id)
+        .where(FaceMatch.status.in_(ACTIVE_MATCH_STATUS))
+    ).all()
 
     match_payload = [_match_payload(session, match) for match in matches]
 
@@ -792,6 +853,37 @@ def add_reference_image(person_id: str, payload: ReferenceImageIn, session: Sess
     return ReferenceImageOut(id=str(ref.id), source_url=ref.source_url, status=ref.status).dict()
 
 
+@router.post("/people/{person_id}/reference-images/{reference_image_id}/delete")
+def delete_reference_image(
+    person_id: str,
+    reference_image_id: str,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    person = session.get(Person, _as_uuid(person_id))
+    ref = session.get(PersonReferenceImage, _as_uuid(reference_image_id))
+    if not person or not ref or ref.person_id != person.id:
+        raise HTTPException(status_code=404, detail="Pessoa ou imagem de referência não encontrada")
+
+    embeddings = session.exec(
+        select(FaceEmbedding).where(FaceEmbedding.reference_image_id == ref.id)
+    ).all()
+    for embedding in embeddings:
+        session.delete(embedding)
+    session.delete(ref)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="delete_reference_image",
+        entity_type="person_reference_image",
+        entity_id=ref.id,
+        metadata={"person_id": str(person.id), "embeddings": len(embeddings)},
+    )
+    session.commit()
+    return {"ok": True, "deleted_embeddings": len(embeddings)}
+
+
 @router.post("/matches/{match_id}/review")
 def review_match(match_id: str, payload: MatchReviewIn, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
     if payload.status not in ALLOWED_MATCH_STATUS:
@@ -799,6 +891,20 @@ def review_match(match_id: str, payload: MatchReviewIn, session: Session = Depen
     match = session.get(FaceMatch, _as_uuid(match_id))
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
+    if payload.status == "REJECTED":
+        session.delete(match)
+        write_action(
+            session,
+            actor_type="admin",
+            actor_id="system",
+            action="delete_rejected_match",
+            entity_type="face_match",
+            entity_id=match.id,
+            metadata={"status": payload.status},
+        )
+        session.commit()
+        return {"ok": True, "status": payload.status}
+
     match.status = payload.status
     match.reviewed_by = match.reviewed_by or None
     match.reviewed_at = datetime.now(timezone.utc)
@@ -863,9 +969,8 @@ def discard_person_image(person_id: str, image_id: str, session: Session = Depen
     ).all()
     now = datetime.now(timezone.utc)
     for match in matches:
-        match.status = "REJECTED"
         match.reviewed_at = now
-        session.add(match)
+        session.delete(match)
 
     write_action(
         session,

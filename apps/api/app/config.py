@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql://postgres:postgres@localhost:5432/qtnf"
     redis_url: str = "redis://localhost:6379/0"
+    seed_on_startup: bool = False
 
     api_base_url: str = "http://localhost:8000"
     web_base_url: str = "http://localhost:3000"
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
     article_discovery_browser_executable: str | None = None
     article_discovery_timeout_seconds: float = 12.0
     article_discovery_max_images: int = 12
+    article_discovery_min_image_dimension: int = 300
 
     allowed_domains_fallback: str = (
         "g1.globo.com,oglobo.globo.com,www1.folha.uol.com.br,www.estadao.com.br,"
