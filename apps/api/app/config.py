@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     store_original_images: bool = False
     allowed_extension_origin: str = "chrome-extension://*"
+    article_discovery_browser_enabled: bool = False
+    article_discovery_browser_executable: str | None = None
+    article_discovery_timeout_seconds: float = 12.0
+    article_discovery_max_images: int = 12
 
     allowed_domains_fallback: str = (
         "g1.globo.com,oglobo.globo.com,www1.folha.uol.com.br,www.estadao.com.br,"

@@ -66,11 +66,12 @@ make seed
 2. Ative **Modo do desenvolvedor**
 3. Clique em **Carregar sem compactação**
 4. Selecione `apps/extension/`
-5. Abra uma página da allowlist e valide overlay da extensão
+5. Abra uma página da allowlist e valide a sidebar da extensão
 
 ## Endpoints principais da API
 
 - `GET /api/v1/health`
+- `POST /api/v1/extension/discover-article-images`
 - `POST /api/v1/extension/analyze-page`
 - `POST /api/v1/extension/faces/{face_id}/suggestions`
 - `GET /api/v1/people`
@@ -91,7 +92,8 @@ make seed
 - API com fluxo ponta a ponta de análise de página, resultados e contestação.
 - Web pública com páginas: home, perfil, conexões, matéria e admin.
 - Seed inicial (`infra/seed/people.json`) com 10 pessoas e 2 imagens públicas.
-- Extensão V3 mínima com allowlist, análise remota, overlay, marcação de pessoa não identificada e sugestão manual.
+- Extensão V3 mínima com allowlist, análise remota, sidebar incremental de imagens, marcação de pessoa não identificada e sugestão manual.
+- Bancada web aceita URL direta de imagem ou URL de matéria permitida; a API descobre imagens prováveis no artigo com heurísticas anti-logo e pode usar navegador renderizado quando configurado.
 - Busca vetorial com PostgreSQL + pgvector, mantendo fallback local para testes com SQLite.
 
 ## Limitações atuais
@@ -99,3 +101,4 @@ make seed
 - Pipeline usa detector/embedding determinístico por imagem, sem InsightFace real ainda.
 - Embeddings faciais são persistidos em coluna `vector(128)` no PostgreSQL/pgvector e também em JSON para fallback de testes.
 - Worker é modo demo inicial (sem fila/broker real).
+- Renderização server-side de matérias com Chromium/Playwright fica desativada por padrão. Ative com `ARTICLE_DISCOVERY_BROWSER_ENABLED=true` e configure `ARTICLE_DISCOVERY_BROWSER_EXECUTABLE` quando o ambiente não tiver browser gerenciado pelo Playwright.

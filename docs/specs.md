@@ -36,7 +36,7 @@ O objetivo do MVP não é identificar qualquer pessoa na internet. O objetivo é
 * Detecção de faces.
 * Geração de embeddings faciais.
 * Comparação com banco vetorial.
-* Overlay com possíveis identificações.
+* Sidebar com possíveis identificações.
 * Página pública de pessoa.
 * Página pública de matéria/imagem.
 * Grafo simples de coaparições.
@@ -133,7 +133,7 @@ infra/
 
 ## 5. Justificativa técnica
 
-Chrome Extension Manifest V3 usa content scripts para interagir com páginas visitadas e service worker no lugar de background pages persistentes. A extensão deve usar content script para descobrir imagens e injetar overlay, e service worker para coordenar chamadas ao backend.
+Chrome Extension Manifest V3 usa content scripts para interagir com páginas visitadas e service worker no lugar de background pages persistentes. A extensão deve usar content script para descobrir imagens e injetar uma sidebar discreta, e service worker para coordenar chamadas ao backend.
 
 PostgreSQL com pgvector permite guardar embeddings e fazer busca por similaridade no mesmo banco relacional, simplificando o MVP.
 
@@ -189,8 +189,8 @@ InsightFace é uma opção open source madura para detecção, alinhamento e rec
 ### 6.3 Extensão mostra resultado
 
 1. Content script recebe matches.
-2. Desenha marcador discreto sobre a imagem.
-3. Ao clicar:
+2. Adiciona a imagem analisada na sidebar da extensão.
+3. Ao expandir a imagem ou uma face:
 
    * mostra card com nomes possíveis
    * score
@@ -220,12 +220,13 @@ Possíveis figuras públicas: 3
 [Desativar neste site]
 ```
 
-### Overlay na página
+### Sidebar na página
 
-Sobre imagens com matches:
+Conforme imagens relevantes carregam:
 
 ```txt
-3 possíveis figuras públicas
+Diga-me
+4 imagens | 7 faces | 3 matches
 ```
 
 Ao expandir:
@@ -978,7 +979,7 @@ ALLOWED_EXTENSION_ORIGIN=chrome-extension://*
 
 * Ao abrir página de domínio permitido, detectar imagens relevantes.
 * Enviar imagens para backend.
-* Mostrar overlay apenas quando houver matches.
+* Adicionar imagens relevantes na sidebar conforme forem carregadas.
 * Popup mostra contagem de imagens/faces/matches.
 * Usuário consegue desativar extensão no domínio atual.
 
@@ -1031,7 +1032,7 @@ ALLOWED_EXTENSION_ORIGIN=chrome-extension://*
 9. Criar admin simples.
 10. Criar extensão Chrome.
 11. Integrar extensão com API.
-12. Polir overlay e popup.
+12. Polir sidebar e popup.
 13. Adicionar opt-out.
 14. Adicionar testes básicos.
 15. Escrever README completo.
@@ -1090,7 +1091,7 @@ O README deve conter:
 
 ## 23. Prompt final para o Codex
 
-Construa este MVP como um monorepo funcional chamado `quem-ta-na-foto`, seguindo a especificação acima. Priorize funcionamento local com Docker Compose, código limpo, tipagem, README completo e fluxo ponta a ponta: seed de pessoas públicas, processamento de imagem, matching facial, extensão Chrome exibindo overlay e site web com perfis/matérias/admin.
+Construa este MVP como um monorepo funcional chamado `quem-ta-na-foto`, seguindo a especificação acima. Priorize funcionamento local com Docker Compose, código limpo, tipagem, README completo e fluxo ponta a ponta: seed de pessoas públicas, processamento de imagem, matching facial, extensão Chrome exibindo sidebar e site web com perfis/matérias/admin.
 
 Não implemente features fora do escopo. Quando houver ambiguidade, escolha a opção mais simples, auditável e segura. O resultado deve rodar localmente com `make setup`, `make dev`, `make migrate` e `make seed`.
 
@@ -1119,13 +1120,13 @@ A frase “diga-me com quem andas e eu te direi quem tu és” não aparece lite
 
 ### Sugestão manual de identificação
 
-A extensão deve permitir que o usuário clique em uma face detectada, mesmo quando não houver match acima do threshold.
+A extensão deve permitir que o usuário revise uma face detectada na sidebar, mesmo quando não houver match acima do threshold.
 
 Fluxo:
 
 1. Backend detecta todas as faces viáveis na imagem.
-2. Extensão desenha marcação sutil também em faces sem identificação.
-3. Ao clicar em uma face não identificada, abrir card:
+2. Extensão lista a face na sidebar também quando não houver identificação.
+3. Ao expandir uma face não identificada, abrir card:
 
 ```txt
 Pessoa não identificada

@@ -29,11 +29,14 @@ type DetectedFacePayload = {
 };
 
 type PersonOption = {
-  id: string;
+  id?: string;
+  person_id?: string;
   name: string;
   display_name?: string;
   slug: string;
-  status: string;
+  status?: string | null;
+  score?: number | null;
+  warning?: string | null;
 };
 
 type AnalyzeResponse = {
@@ -43,6 +46,23 @@ type AnalyzeResponse = {
     image_id: string;
     faces: Face[];
   }>;
+  warnings: string[];
+};
+
+type DiscoveredImage = {
+  image_url: string;
+  width?: number | null;
+  height?: number | null;
+  alt?: string | null;
+  source: string;
+  score: number;
+};
+
+type DiscoverResponse = {
+  page_url: string;
+  title?: string | null;
+  images: DiscoveredImage[];
+  ignored_images?: Array<DiscoveredImage & { reason: string }>;
   warnings: string[];
 };
 
@@ -61,6 +81,16 @@ function withProbeNonce(url: string) {
 
 function proxiedImageUrl(url: string) {
   return `/api/image-proxy?url=${encodeURIComponent(url)}`;
+}
+
+function isLikelyImageUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.toLowerCase();
+    return /\.(avif|bmp|gif|jpe?g|png|webp)(?:$|\?)/.test(pathname);
+  } catch (_error: unknown) {
+    return false;
+  }
 }
 
 function bboxStyle(face: Face, naturalSize: { width: number; height: number }) {
@@ -183,15 +213,20 @@ export default function HomePage() {
   const peopleSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputUrl, setInputUrl] = useState(DEFAULT_IMAGE_URL);
   const [submittedUrl, setSubmittedUrl] = useState('');
+  const [submittedSourceUrl, setSubmittedSourceUrl] = useState('');
   const [articleUrl, setArticleUrl] = useState(DEFAULT_ARTICLE_URL);
+  const [discoveredImages, setDiscoveredImages] = useState<DiscoveredImage[]>([]);
+  const [ignoredImages, setIgnoredImages] = useState<Array<DiscoveredImage & { reason: string }>>([]);
+  const [articleTitle, setArticleTitle] = useState('');
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
-  const [suggestedName, setSuggestedName] = useState('');
-  const [peopleOptions, setPeopleOptions] = useState<PersonOption[]>([]);
-  const [suggestionFeedback, setSuggestionFeedback] = useState('');
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [suggestionNames, setSuggestionNames] = useState<Record<string, string>>({});
+  const [peopleOptions, setPeopleOptions] = useState<Record<string, PersonOption[]>>({});
+  const [suggestionFeedback, setSuggestionFeedback] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState('');
-  const [detectorStatus, setDetectorStatus] = useState('Cole uma URL de imagem para começar.');
+  const [detectorStatus, setDetectorStatus] = useState('Cole uma URL de imagem ou matéria para começar.');
   const [loading, setLoading] = useState(false);
 
   const faces = result?.results[0]?.faces || [];
@@ -214,6 +249,7 @@ export default function HomePage() {
     if (url) {
       setInputUrl(url);
       setSubmittedUrl(url);
+      setSubmittedSourceUrl(url);
       setDetectorStatus('Carregando imagem...');
     }
   }, []);
@@ -226,8 +262,9 @@ export default function HomePage() {
 
     setLoading(true);
     setFeedback('');
-    setSuggestionFeedback('');
-    setSuggestedName('');
+    setSuggestionFeedback({});
+    setSuggestionNames({});
+    setPeopleOptions({});
     setSelectedFaceId(null);
     setResult(null);
     setDetectorStatus('Detectando faces no navegador...');
@@ -265,69 +302,137 @@ export default function HomePage() {
     }
   };
 
-  const submitUrl = (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = inputUrl.trim();
-    if (!trimmed) {
-      setFeedback('Informe uma URL de imagem.');
-      return;
-    }
-
+  const openImageUrl = (imageUrl: string, nextArticleUrl = articleUrl) => {
     const next = new URL(window.location.href);
-    next.searchParams.set('url', trimmed);
-    if (articleUrl.trim()) {
-      next.searchParams.set('article', articleUrl.trim());
+    next.searchParams.set('url', imageUrl);
+    if (nextArticleUrl.trim()) {
+      next.searchParams.set('article', nextArticleUrl.trim());
     }
     window.history.replaceState({}, '', next);
 
-    setSubmittedUrl(trimmed);
+    setSubmittedUrl(imageUrl);
     setNaturalSize({ width: 0, height: 0 });
     setResult(null);
     setFeedback('');
-    setSuggestionFeedback('');
+    setSuggestionFeedback({});
+    setSuggestionNames({});
+    setPeopleOptions({});
     setDetectorStatus('Carregando imagem...');
   };
 
-  const suggestFace = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!selectedFace || !suggestedName.trim()) {
-      setSuggestionFeedback('Selecione uma face e informe um nome para sugerir.');
-      return;
-    }
-
-    const selectedPerson = peopleOptions.find(
-      (person) => (person.display_name || person.name).toLowerCase() === suggestedName.trim().toLowerCase(),
-    );
-    setSuggestionFeedback('Enviando sugestão...');
+  const discoverFromArticleUrl = async (url: string, debug = debugEnabled) => {
+    setLoading(true);
+    setFeedback('');
+    setResult(null);
+    setDiscoveredImages([]);
+    setIgnoredImages([]);
+    setArticleTitle('');
+    setSubmittedUrl('');
+    setSubmittedSourceUrl(url);
+    setDetectorStatus('Buscando imagens prováveis na matéria...');
     try {
-      await api.post(`/extension/faces/${selectedFace.face_id}/suggestions`, {
-        suggested_name: suggestedName.trim(),
-        suggested_person_id: selectedPerson?.id || null,
-        comment: 'Sugestão criada pela bancada de imagem direta.',
+      const discovery = await api.post<DiscoverResponse>('/extension/discover-article-images', {
+        page_url: url,
+        max_images: 12,
+        debug,
       });
-      setSuggestionFeedback('Sugestão enviada para curadoria.');
-      setSuggestedName('');
+      setArticleUrl(discovery.page_url);
+      setArticleTitle(discovery.title || '');
+      setDiscoveredImages(discovery.images);
+      setIgnoredImages(discovery.ignored_images || []);
+      if (discovery.warnings.length > 0) {
+        setFeedback(discovery.warnings.join(' '));
+      }
+      const firstImage = discovery.images[0]?.image_url;
+      if (!firstImage) {
+        setDetectorStatus('Nenhuma imagem jornalística provável foi encontrada.');
+        return;
+      }
+      openImageUrl(firstImage, discovery.page_url);
     } catch (error: unknown) {
-      setSuggestionFeedback(error instanceof Error ? error.message : 'Erro ao enviar sugestão.');
+      setDetectorStatus('Não foi possível descobrir imagens nessa matéria.');
+      setFeedback(error instanceof Error ? error.message : 'Falha ao ler a matéria.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const searchPeople = (value: string) => {
-    setSuggestedName(value);
+  const submitUrl = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = inputUrl.trim();
+    if (!trimmed) {
+      setFeedback('Informe uma URL de imagem ou matéria.');
+      return;
+    }
+
+    setSubmittedSourceUrl(trimmed);
+    setDiscoveredImages([]);
+    setIgnoredImages([]);
+    setArticleTitle('');
+    if (!isLikelyImageUrl(trimmed)) {
+      await discoverFromArticleUrl(trimmed);
+      return;
+    }
+
+    openImageUrl(trimmed);
+  };
+
+  const suggestFace = async (event: FormEvent, face: Face) => {
+    event.preventDefault();
+    const suggestedName = (suggestionNames[face.face_id] || '').trim();
+    if (!suggestedName) {
+      setSuggestionFeedback((current) => ({ ...current, [face.face_id]: 'Informe um nome para sugerir.' }));
+      return;
+    }
+
+    const selectedPerson = (peopleOptions[face.face_id] || []).find(
+      (person) => (person.display_name || person.name).toLowerCase() === suggestedName.trim().toLowerCase(),
+    );
+    setSuggestionFeedback((current) => ({ ...current, [face.face_id]: 'Enviando sugestão...' }));
+    try {
+      await api.post(`/extension/faces/${face.face_id}/suggestions`, {
+        suggested_name: suggestedName.trim(),
+        suggested_person_id: selectedPerson?.id || selectedPerson?.person_id || null,
+        comment: 'Sugestão criada pela bancada de imagem direta.',
+      });
+      setSuggestionFeedback((current) => ({ ...current, [face.face_id]: 'Sugestão enviada para curadoria.' }));
+      setSuggestionNames((current) => ({ ...current, [face.face_id]: '' }));
+    } catch (error: unknown) {
+      setSuggestionFeedback((current) => ({
+        ...current,
+        [face.face_id]: error instanceof Error ? error.message : 'Erro ao enviar sugestão.',
+      }));
+    }
+  };
+
+  const searchPeople = (face: Face, value: string) => {
+    setSuggestionNames((current) => ({ ...current, [face.face_id]: value }));
     const query = value.trim();
     if (peopleSearchTimer.current) {
       clearTimeout(peopleSearchTimer.current);
     }
     if (query.length < 2) {
-      setPeopleOptions([]);
+      setPeopleOptions((current) => ({ ...current, [face.face_id]: [] }));
       return;
     }
     peopleSearchTimer.current = setTimeout(() => {
-      api
-        .get<PersonOption[]>(`/people?query=${encodeURIComponent(query)}`)
-        .then((rows) => setPeopleOptions(rows.filter((person) => person.status === 'ACTIVE').slice(0, 8)))
-        .catch(() => setPeopleOptions([]));
+      const request = debugEnabled
+        ? api.get<PersonOption[]>(
+            `/extension/debug/faces/${face.face_id}/people-scores?query=${encodeURIComponent(query)}`,
+          )
+        : api.get<PersonOption[]>(`/people?query=${encodeURIComponent(query)}`);
+      request
+        .then((rows) => {
+          const filtered = rows.filter((person) => !person.status || person.status === 'ACTIVE' || person.score !== undefined).slice(0, 8);
+          setPeopleOptions((current) => ({ ...current, [face.face_id]: filtered }));
+        })
+        .catch(() => setPeopleOptions((current) => ({ ...current, [face.face_id]: [] })));
     }, 220);
+  };
+
+  const selectSuggestion = (face: Face, person: PersonOption) => {
+    setSuggestionNames((current) => ({ ...current, [face.face_id]: person.display_name || person.name }));
+    setPeopleOptions((current) => ({ ...current, [face.face_id]: [] }));
   };
 
   return (
@@ -342,10 +447,10 @@ export default function HomePage() {
 
       <section className={`review-url-panel ${submittedUrl ? 'compact' : ''}`}>
         <p className="kicker">Bancada de marcação</p>
-        <h1>Marcar e revisar faces em uma imagem</h1>
+        <h1>Marcar e revisar faces em uma imagem ou matéria</h1>
         <form className="review-url-form" onSubmit={submitUrl}>
           <label>
-            URL da imagem
+            URL da imagem ou matéria
             <input
               className="input"
               value={inputUrl}
@@ -354,9 +459,23 @@ export default function HomePage() {
             />
           </label>
           <button className="button" type="submit" disabled={loading}>
-            {loading ? 'Analisando...' : 'Abrir imagem'}
+            {loading ? 'Analisando...' : 'Analisar URL'}
           </button>
         </form>
+        <label className="debug-toggle">
+          <input
+            checked={debugEnabled}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              setDebugEnabled(enabled);
+              if (enabled && submittedSourceUrl && !isLikelyImageUrl(submittedSourceUrl)) {
+                void discoverFromArticleUrl(submittedSourceUrl, true);
+              }
+            }}
+            type="checkbox"
+          />
+          Debug
+        </label>
         <details className="article-context">
           <summary>Contexto da matéria usado pela API</summary>
           <input
@@ -366,7 +485,7 @@ export default function HomePage() {
             placeholder="URL da matéria permitida"
           />
         </details>
-        <p className="muted">A URL fica em <code>?url=</code>, então o teste pode ser recarregado e compartilhado.</p>
+        <p className="muted">A URL da imagem fica em <code>?url=</code>; a matéria fica em <code>?article=</code>.</p>
       </section>
 
       {submittedUrl ? (
@@ -374,11 +493,27 @@ export default function HomePage() {
           <div className="review-stage-panel">
             <div className="review-stage-header">
               <div>
-                <p className="eyebrow">Imagem</p>
+                <p className="eyebrow">{articleTitle ? articleTitle : 'Imagem'}</p>
                 <strong>{detectorStatus}</strong>
               </div>
               <span className="face-count">{faces.length || 0} persistida(s)</span>
             </div>
+            {discoveredImages.length > 1 ? (
+              <div className="article-image-strip" aria-label="Imagens encontradas na matéria">
+                {discoveredImages.map((item) => (
+                  <button
+                    className={item.image_url === submittedUrl ? 'active' : ''}
+                    key={item.image_url}
+                    onClick={() => openImageUrl(item.image_url, articleUrl)}
+                    type="button"
+                    title={`${item.source} · score ${item.score}`}
+                  >
+                    <img src={proxiedImageUrl(item.image_url)} alt={item.alt || ''} />
+                    <span>{item.width && item.height ? `${item.width}x${item.height}` : item.source}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             <div className="review-canvas">
               <div className="probe-image-wrap">
@@ -395,6 +530,11 @@ export default function HomePage() {
                     void analyzeLoadedImage();
                   }}
                   onError={() => {
+                    const fallbackUrl = submittedSourceUrl || submittedUrl;
+                    if (fallbackUrl && fallbackUrl === submittedUrl) {
+                      void discoverFromArticleUrl(fallbackUrl);
+                      return;
+                    }
                     setDetectorStatus('Não foi possível carregar a imagem.');
                     setFeedback('A URL da imagem não carregou pela bancada.');
                   }}
@@ -409,7 +549,7 @@ export default function HomePage() {
                     key={face.face_id}
                     onClick={() => {
                       setSelectedFaceId(face.face_id);
-                      setSuggestionFeedback('');
+                      setSuggestionFeedback((current) => ({ ...current, [face.face_id]: '' }));
                     }}
                     style={bboxStyle(face, naturalSize)}
                     type="button"
@@ -429,90 +569,139 @@ export default function HomePage() {
             <div className="correction-head">
               <div>
                 <p className="eyebrow">Curadoria</p>
-                <h2>Identificar face</h2>
+                <h2>Faces detectadas</h2>
               </div>
               {result ? <Link href={`/materia/${result.article_id}`}>Matéria</Link> : null}
             </div>
 
-            {selectedFace ? (
-              <>
-                <div className="selected-face-card">
-                  <div>
-                        <strong>{faceDisplayName(selectedFace, faces.findIndex((face) => face.face_id === selectedFace.face_id))}</strong>
-                    <p className="muted">
-                      {selectedFace.matches.length
-                        ? 'Há candidatos automáticos para revisar.'
-                        : 'Sem match automático. Sugira uma pessoa para curadoria.'}
-                    </p>
-                  </div>
-                  <div className="bbox-chips" aria-label="Coordenadas da face">
-                    <span>x {Math.round(selectedFace.bbox.x)}</span>
-                    <span>y {Math.round(selectedFace.bbox.y)}</span>
-                    <span>w {Math.round(selectedFace.bbox.w)}</span>
-                    <span>h {Math.round(selectedFace.bbox.h)}</span>
-                  </div>
-                </div>
-
-                {selectedFace.matches.length ? (
-                  <div className="candidate-list">
-                    {selectedFace.matches.map((match) => (
-                      <div className="candidate-card" key={match.slug}>
-                        <div>
-                          <strong>{match.name}</strong>
-                          <p className="muted">score {match.score.toFixed(3)}</p>
-                        </div>
-                        {match.profile_url ? <Link href={match.profile_url}>Perfil público</Link> : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <form className="correction-form" onSubmit={suggestFace}>
-                    <label>
-                      Nome da pessoa
-                      <input
-                        className="input"
-                        list="review-people-options"
-                        value={suggestedName}
-                        onChange={(event) => searchPeople(event.target.value)}
-                        placeholder="Ex.: Fernando Haddad"
-                      />
-                      <datalist id="review-people-options">
-                        {peopleOptions.map((person) => (
-                          <option key={person.id} value={person.display_name || person.name} />
-                        ))}
-                      </datalist>
-                    </label>
-                    <button className="button" type="submit">
-                      Sugerir identificação
-                    </button>
-                  </form>
-                )}
-
-                {suggestionFeedback ? <p className="status-line">{suggestionFeedback}</p> : null}
-              </>
-            ) : (
+            {!faces.length ? (
               <p className="empty-state">
                 {loading ? 'Aguardando detecção...' : 'Nenhuma face selecionada ou detectada nesta imagem.'}
               </p>
-            )}
+            ) : null}
 
-                {faces.length ? (
-                  <div className="face-list" aria-label="Faces detectadas">
-                    {faces.map((face, index) => (
-                      <button
-                    className={`face-list-button ${selectedFace?.face_id === face.face_id ? 'active' : ''}`}
-                    key={face.face_id}
-                    onClick={() => {
-                      setSelectedFaceId(face.face_id);
-                      setSuggestionFeedback('');
-                        }}
-                        type="button"
-                      >
-                        <span>{faceDisplayName(face, index)}</span>
-                        <small>{face.matches.length ? confidenceLabel(face) : 'sem identificação'}</small>
-                      </button>
-                    ))}
+            {faces.length ? (
+              <div className="curation-face-list" aria-label="Faces detectadas">
+                {faces.map((face, index) => {
+                  const match = topMatch(face);
+                  const options = peopleOptions[face.face_id] || [];
+                  const feedbackForFace = suggestionFeedback[face.face_id];
+                  return (
+                    <article
+                      className={`curation-face-card ${selectedFace?.face_id === face.face_id ? 'active' : ''}`}
+                      key={face.face_id}
+                      onClick={() => setSelectedFaceId(face.face_id)}
+                    >
+                      <div className="curation-face-heading">
+                        <span className="face-pill">{index + 1}</span>
+                        {match ? (
+                          <div>
+                            <strong>{match.name}</strong>
+                            <p className="muted">{confidenceLabel(face)} identificado</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <strong>Não identificada</strong>
+                            <p className="muted">Sugira uma pessoa para curadoria.</p>
+                          </div>
+                        )}
+                        {match?.profile_url ? <Link href={match.profile_url}>Perfil</Link> : null}
+                      </div>
+
+                      {match ? (
+                        <div className="candidate-list compact">
+                          {face.matches.slice(1).map((item) => (
+                            <div className="candidate-card compact" key={item.slug}>
+                              <span>{item.name}</span>
+                              <small>{Math.round(item.score * 100)}%</small>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <form className="inline-suggestion-form" onSubmit={(event) => suggestFace(event, face)}>
+                          <div className="autocomplete-wrap">
+                            <input
+                              className="transparent-input"
+                              value={suggestionNames[face.face_id] || ''}
+                              onChange={(event) => searchPeople(face, event.target.value)}
+                              onFocus={() => setSelectedFaceId(face.face_id)}
+                              placeholder="Digite um nome"
+                            />
+                            {options.length > 0 ? (
+                              <div className="autocomplete-menu">
+                                {options.map((person) => (
+                                  <button
+                                    key={person.id || person.person_id || person.slug}
+                                    onClick={() => selectSuggestion(face, person)}
+                                    type="button"
+                                  >
+                                    <span>{person.display_name || person.name}</span>
+                                    {debugEnabled && person.score !== undefined && person.score !== null ? (
+                                      <small>{Math.round(person.score * 100)}%</small>
+                                    ) : null}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                          <button className="button subtle-button" type="submit">
+                            Sugerir
+                          </button>
+                        </form>
+                      )}
+
+                      {feedbackForFace ? <p className="status-line">{feedbackForFace}</p> : null}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {debugEnabled ? (
+              <section className="debug-panel" aria-label="Debug">
+                <div className="correction-head">
+                  <div>
+                    <p className="eyebrow">Debug</p>
+                    <h3>Dados técnicos</h3>
                   </div>
+                </div>
+                <div className="debug-grid">
+                  <div>
+                    <strong>Imagem atual</strong>
+                    <p>{submittedUrl || 'nenhuma'}</p>
+                    <p>natural {naturalSize.width}x{naturalSize.height}</p>
+                    {result ? <p>article {result.article_id}</p> : null}
+                  </div>
+                  <div>
+                    <strong>Warnings</strong>
+                    <p>{feedback || 'sem warnings'}</p>
+                  </div>
+                </div>
+                <div className="debug-list">
+                  <strong>Faces</strong>
+                  {faces.map((face, index) => (
+                    <p key={face.face_id}>
+                      #{index + 1} {face.face_id} · x {Math.round(face.bbox.x)}, y {Math.round(face.bbox.y)}, w {Math.round(face.bbox.w)}, h {Math.round(face.bbox.h)}
+                    </p>
+                  ))}
+                </div>
+                <div className="debug-list">
+                  <strong>Imagens aceitas pelo crawler</strong>
+                  {discoveredImages.length ? discoveredImages.map((image) => (
+                    <p key={image.image_url}>
+                      {image.source} · {image.width || '?'}x{image.height || '?'} · score {image.score.toFixed(3)} · {image.image_url}
+                    </p>
+                  )) : <p>sem lista de crawler nesta análise</p>}
+                </div>
+                <div className="debug-list">
+                  <strong>Imagens ignoradas pelo crawler</strong>
+                  {ignoredImages.length ? ignoredImages.map((image) => (
+                    <p key={`${image.reason}-${image.image_url}`}>
+                      {image.reason} · {image.source} · {image.width || '?'}x{image.height || '?'} · score {image.score.toFixed(3)} · {image.image_url}
+                    </p>
+                  )) : <p>nenhuma imagem ignorada registrada</p>}
+                </div>
+              </section>
             ) : null}
           </aside>
         </section>

@@ -61,7 +61,8 @@ def init_db() -> None:
                     "ALTER TABLE faceembedding "
                     "ALTER COLUMN embedding_vector TYPE vector(128) "
                     "USING CASE "
-                    "WHEN embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128 "
+                    "WHEN embedding IS NOT NULL AND jsonb_typeof(embedding::jsonb) = 'array' "
+                    "AND jsonb_array_length(embedding::jsonb) = 128 "
                     "THEN embedding::text::vector ELSE NULL END"
                 )
             )
@@ -70,7 +71,8 @@ def init_db() -> None:
                     "ALTER TABLE detectedface "
                     "ALTER COLUMN embedding_vector TYPE vector(128) "
                     "USING CASE "
-                    "WHEN embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128 "
+                    "WHEN embedding IS NOT NULL AND jsonb_typeof(embedding::jsonb) = 'array' "
+                    "AND jsonb_array_length(embedding::jsonb) = 128 "
                     "THEN embedding::text::vector ELSE NULL END"
                 )
             )
@@ -78,14 +80,16 @@ def init_db() -> None:
                 text(
                     "UPDATE faceembedding "
                     "SET embedding_vector = embedding::text::vector "
-                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128"
+                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL "
+                    "AND jsonb_typeof(embedding::jsonb) = 'array' AND jsonb_array_length(embedding::jsonb) = 128"
                 )
             )
             connection.execute(
                 text(
                     "UPDATE detectedface "
                     "SET embedding_vector = embedding::text::vector "
-                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL AND jsonb_array_length(embedding::jsonb) = 128"
+                    "WHERE embedding_vector IS NULL AND embedding IS NOT NULL "
+                    "AND jsonb_typeof(embedding::jsonb) = 'array' AND jsonb_array_length(embedding::jsonb) = 128"
                 )
             )
             connection.execute(

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException
 import re
+import unicodedata
 from typing import Final
 from uuid import UUID
 from sqlmodel import Session, select
@@ -20,10 +21,10 @@ from ..models import (
     DetectedFace,
     FaceEmbedding,
 )
-from ..schemas import LoginIn, LoginOut, MatchReassignIn, MatchReviewIn, PersonCreate, PersonUpdate, ReferenceImageIn, ReferenceImageOut
+from ..schemas import AdminAddFacesIn, LoginIn, LoginOut, MatchReassignIn, MatchReviewIn, PersonCreate, PersonUpdate, ReferenceImageIn, ReferenceImageOut
 from ..services.audit import write_action
 from ..services.image_fetcher import fetch_image
-from ..services.match import embedding_from_image
+from ..services.match import embedding_from_image, match_candidates, normalize_embedding
 from .extension import promote_face_reference, _upsert_manual_match
 
 router = APIRouter(prefix="/admin")
@@ -82,6 +83,108 @@ def _person_payload(item: Person) -> dict:
     }
 
 
+def _slugify(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.lower().strip())
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9-]", "", re.sub(r"\s+", "-", ascii_value))
+    return slug or "pessoa-sugerida"
+
+
+def _article_context(session: Session, face_id: UUID | None) -> dict:
+    if not face_id:
+        return {
+            "face_id": None,
+            "bbox": None,
+            "image_id": None,
+            "image_url": None,
+            "article_id": None,
+            "article_title": None,
+            "article_url": None,
+            "captured_at": None,
+        }
+
+    face = session.get(DetectedFace, face_id)
+    image = session.get(ArticleImage, face.article_image_id) if face else None
+    article = session.get(Article, image.article_id) if image else None
+    return {
+        "face_id": str(face.id) if face else str(face_id),
+        "bbox": face.bbox if face else None,
+        "image_id": str(image.id) if image else None,
+        "image_url": image.image_url if image else None,
+        "image_width": image.width if image else None,
+        "image_height": image.height if image else None,
+        "article_id": str(article.id) if article else None,
+        "article_title": article.title if article else None,
+        "article_url": article.url if article else None,
+        "captured_at": article.captured_at if article else None,
+    }
+
+
+def _match_payload(session: Session, item: FaceMatch) -> dict:
+    person = session.get(Person, item.person_id)
+    return {
+        "id": str(item.id),
+        "detected_face_id": str(item.detected_face_id),
+        "person_id": str(item.person_id),
+        "person_name": person.display_name or person.name if person else None,
+        "person_slug": person.slug if person else None,
+        "score": item.score,
+        "status": item.status,
+        "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
+        "reviewed_at": item.reviewed_at,
+        **_article_context(session, item.detected_face_id),
+    }
+
+
+def _suggestion_payload(session: Session, item: FaceSuggestion) -> dict:
+    suggested = session.get(Person, item.suggested_person_id) if item.suggested_person_id else None
+    return {
+        "id": str(item.id),
+        "detected_face_id": str(item.detected_face_id),
+        "suggested_name": item.suggested_name,
+        "suggested_person_id": str(item.suggested_person_id) if item.suggested_person_id else None,
+        "suggested_person_name": suggested.display_name or suggested.name if suggested else None,
+        "suggested_person_slug": suggested.slug if suggested else None,
+        "source_url": item.source_url,
+        "comment": item.comment,
+        "submitter_email": item.submitter_email,
+        "status": item.status,
+        "created_at": item.created_at,
+        **_article_context(session, item.detected_face_id),
+    }
+
+
+def _bbox_iou(first: dict, second: dict) -> float:
+    left = max(float(first.get("x", 0)), float(second.get("x", 0)))
+    top = max(float(first.get("y", 0)), float(second.get("y", 0)))
+    right = min(float(first.get("x", 0)) + float(first.get("w", 0)), float(second.get("x", 0)) + float(second.get("w", 0)))
+    bottom = min(float(first.get("y", 0)) + float(first.get("h", 0)), float(second.get("y", 0)) + float(second.get("h", 0)))
+    intersection = max(0.0, right - left) * max(0.0, bottom - top)
+    if intersection <= 0:
+        return 0.0
+    first_area = max(0.0, float(first.get("w", 0))) * max(0.0, float(first.get("h", 0)))
+    second_area = max(0.0, float(second.get("w", 0))) * max(0.0, float(second.get("h", 0)))
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def _normalized_face_payload(face, image: ArticleImage) -> dict | None:
+    image_width = image.width or 0
+    image_height = image.height or 0
+    x = max(0.0, min(float(face.x), float(image_width)))
+    y = max(0.0, min(float(face.y), float(image_height)))
+    w = max(0.0, min(float(face.w), float(image_width) - x))
+    h = max(0.0, min(float(face.h), float(image_height) - y))
+    if w < 18 or h < 18:
+        return None
+    return {
+        "bbox": {"x": x, "y": y, "w": w, "h": h},
+        "quality_score": face.score,
+        "embedding": normalize_embedding(face.embedding),
+        "model_name": face.embedding_model or "face-api.js/faceRecognitionNet",
+    }
+
+
 @router.get("/people")
 def list_people(query: str | None = None, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
     stmt = select(Person)
@@ -131,27 +234,7 @@ def get_admin_person(person_id: str, session: Session = Depends(get_session), _:
     ).all()
     matches = session.exec(select(FaceMatch).where(FaceMatch.person_id == person.id)).all()
 
-    match_payload = []
-    for match in matches:
-        face = session.get(DetectedFace, match.detected_face_id)
-        image = session.get(ArticleImage, face.article_image_id) if face else None
-        article = session.get(Article, image.article_id) if image else None
-        match_payload.append(
-            {
-                "id": str(match.id),
-                "detected_face_id": str(match.detected_face_id),
-                "person_id": str(match.person_id),
-                "score": match.score,
-                "status": match.status,
-                "bbox": face.bbox if face else None,
-                "image_id": str(image.id) if image else None,
-                "image_url": image.image_url if image else None,
-                "article_id": str(article.id) if article else None,
-                "article_title": article.title if article else None,
-                "article_url": article.url if article else None,
-                "captured_at": article.captured_at if article else None,
-            }
-        )
+    match_payload = [_match_payload(session, match) for match in matches]
 
     return {
         "person": _person_payload(person),
@@ -293,6 +376,144 @@ def reassign_match(match_id: str, payload: MatchReassignIn, session: Session = D
     return {"ok": True, "person_id": str(person.id), "status": match.status}
 
 
+@router.post("/people/{person_id}/article-images/{image_id}/discard")
+def discard_person_image(person_id: str, image_id: str, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+    person = session.get(Person, _as_uuid(person_id))
+    image = session.get(ArticleImage, _as_uuid(image_id))
+    if not person or not image:
+        raise HTTPException(status_code=404, detail="Pessoa ou imagem não encontrada")
+
+    matches = session.exec(
+        select(FaceMatch)
+        .join(DetectedFace, FaceMatch.detected_face_id == DetectedFace.id)
+        .where(FaceMatch.person_id == person.id)
+        .where(DetectedFace.article_image_id == image.id)
+    ).all()
+    now = datetime.now(timezone.utc)
+    for match in matches:
+        match.status = "REJECTED"
+        match.reviewed_at = now
+        session.add(match)
+
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="discard_person_image",
+        entity_type="article_image",
+        entity_id=image.id,
+        metadata={"person_id": str(person.id), "matches": len(matches)},
+    )
+    session.commit()
+    return {"ok": True, "discarded_matches": len(matches)}
+
+
+@router.post("/article-images/{image_id}/faces")
+def add_faces_to_article_image(
+    image_id: str,
+    payload: AdminAddFacesIn,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    image = session.get(ArticleImage, _as_uuid(image_id))
+    if not image:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+
+    existing_faces = session.exec(select(DetectedFace).where(DetectedFace.article_image_id == image.id)).all()
+    person_embeddings = session.exec(select(FaceEmbedding)).all()
+    created = 0
+    reused = 0
+    manual_matches = 0
+    automatic_matches = 0
+
+    for incoming in payload.faces:
+        normalized = _normalized_face_payload(incoming, image)
+        if not normalized:
+            continue
+
+        duplicate = next(
+            (
+                face
+                for face in existing_faces
+                if _bbox_iou(face.bbox, normalized["bbox"]) >= 0.75
+            ),
+            None,
+        )
+        if duplicate:
+            detected = duplicate
+            reused += 1
+        else:
+            detected = DetectedFace(
+                article_image_id=image.id,
+                bbox=normalized["bbox"],
+                embedding=normalized["embedding"],
+                embedding_vector=normalized["embedding"],
+                quality_score=normalized["quality_score"],
+                model_name=normalized["model_name"],
+                model_version="0.1",
+            )
+            session.add(detected)
+            session.flush()
+            existing_faces.append(detected)
+            created += 1
+
+        if incoming.person_id:
+            person = session.get(Person, incoming.person_id)
+            if not person:
+                raise HTTPException(status_code=404, detail="Pessoa escolhida não encontrada")
+            _upsert_manual_match(session, detected, person)
+            promote_face_reference(session, detected, person)
+            manual_matches += 1
+            continue
+
+        if normalized["embedding"]:
+            for item_match in match_candidates(session, normalized["embedding"], person_embeddings):
+                person = session.get(Person, item_match["person_id"])
+                if not person or person.status in {"OPTOUT_LIMITED", "REMOVED"}:
+                    continue
+                existing_match = session.exec(
+                    select(FaceMatch).where(
+                        FaceMatch.detected_face_id == detected.id,
+                        FaceMatch.person_id == person.id,
+                    )
+                ).first()
+                if existing_match:
+                    continue
+                session.add(
+                    FaceMatch(
+                        detected_face_id=detected.id,
+                        person_id=person.id,
+                        score=item_match["score"],
+                        distance=item_match["distance"],
+                        status="AUTO",
+                    )
+                )
+                automatic_matches += 1
+
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="add_faces_to_article_image",
+        entity_type="article_image",
+        entity_id=image.id,
+        metadata={
+            "created": created,
+            "reused": reused,
+            "manual_matches": manual_matches,
+            "automatic_matches": automatic_matches,
+        },
+    )
+    session.commit()
+    return {
+        "ok": True,
+        "created_faces": created,
+        "reused_faces": reused,
+        "manual_matches": manual_matches,
+        "automatic_matches": automatic_matches,
+    }
+
+
 @router.post("/suggestions/{suggestion_id}/review")
 def review_suggestion(
     suggestion_id: str,
@@ -322,13 +543,7 @@ def review_suggestion(
         if not person:
             person = session.exec(select(Person).where(Person.name == suggestion.suggested_name)).first()
             if not person:
-                base_slug = re.sub(
-                    r"[^a-z0-9-]",
-                    "",
-                    re.sub(r"\s+", "-", suggestion.suggested_name.lower().strip()),
-                )
-                if not base_slug:
-                    base_slug = "pessoa-sugerida"
+                base_slug = _slugify(suggestion.suggested_name)
                 final_slug = base_slug[:80]
                 suffix = 2
                 while session.exec(select(Person).where(Person.slug == final_slug)).first():
@@ -389,37 +604,19 @@ def list_suggestions(
     stmt = select(FaceSuggestion).order_by(FaceSuggestion.created_at.desc())
     if status:
         stmt = stmt.where(FaceSuggestion.status == status)
-    return [
-        {
-            "id": str(item.id),
-            "detected_face_id": str(item.detected_face_id),
-            "suggested_name": item.suggested_name,
-            "suggested_person_id": str(item.suggested_person_id) if item.suggested_person_id else None,
-            "source_url": item.source_url,
-            "comment": item.comment,
-            "submitter_email": item.submitter_email,
-            "status": item.status,
-            "created_at": item.created_at,
-        }
-        for item in session.exec(stmt).all()
-    ]
+    return [_suggestion_payload(session, item) for item in session.exec(stmt).all()]
 
 
 @router.get("/matches")
-def list_matches(session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
-    matches = session.exec(select(FaceMatch)).all()
-    return [
-        {
-            "id": str(item.id),
-            "detected_face_id": str(item.detected_face_id),
-            "person_id": str(item.person_id),
-            "score": item.score,
-            "status": item.status,
-            "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
-            "reviewed_at": item.reviewed_at,
-        }
-        for item in matches
-    ]
+def list_matches(
+    status: str | None = None,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    stmt = select(FaceMatch).order_by(FaceMatch.created_at.desc())
+    if status:
+        stmt = stmt.where(FaceMatch.status == status)
+    return [_match_payload(session, item) for item in session.exec(stmt).all()]
 
 
 @router.get("/optout-requests")

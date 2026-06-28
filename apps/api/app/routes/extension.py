@@ -2,7 +2,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 from math import isfinite
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, and_, select
 
 from ..config import get_settings
@@ -19,16 +19,22 @@ from ..models import (
     PersonReferenceImage,
 )
 from ..services.face_detector import detect_faces
+from ..services.article_image_discovery import discover_article_images
 from ..services.image_fetcher import fetch_image
-from ..services.match import match_candidates, normalize_embedding
+from ..services.match import cosine, match_candidates, normalize_embedding
 from ..services.privacy import hash_sha256, ensure_domain
 from ..services.audit import write_action
 from ..schemas import (
     AnalyzeImageOut,
     AnalyzePageRequest,
     AnalyzePageResponse,
+    ArticleImageCandidate,
     BBox,
+    DebugPersonScoreOut,
+    DiscoverArticleImagesRequest,
+    DiscoverArticleImagesResponse,
     FaceOut,
+    IgnoredArticleImageCandidate,
     MatchOut,
     SuggestionCreate,
 )
@@ -219,6 +225,103 @@ def promote_face_reference(session: Session, face: DetectedFace, person: Person)
             quality_score=face.quality_score,
         )
     )
+
+
+@router.post("/extension/discover-article-images", response_model=DiscoverArticleImagesResponse)
+def discover_images(payload: DiscoverArticleImagesRequest, session: Session = Depends(get_session)):
+    if not _is_allowed(session, payload.page_url):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Domínio fora da allowlist; descoberta bloqueada.",
+        )
+
+    result = discover_article_images(
+        payload.page_url,
+        render_browser=payload.render_browser,
+        max_images=payload.max_images,
+    )
+    return DiscoverArticleImagesResponse(
+        page_url=result.page_url,
+        title=result.title,
+        images=[
+            ArticleImageCandidate(
+                image_url=image.image_url,
+                width=image.width,
+                height=image.height,
+                alt=image.alt,
+                source=image.source,
+                score=round(image.score, 3),
+            )
+            for image in result.images
+        ],
+        ignored_images=[
+            IgnoredArticleImageCandidate(
+                image_url=image.image_url,
+                width=image.width,
+                height=image.height,
+                alt=image.alt,
+                source=image.source,
+                score=round(image.score, 3),
+                reason=image.reason,
+            )
+            for image in result.ignored_images
+        ]
+        if payload.debug
+        else [],
+        warnings=result.warnings,
+    )
+
+
+@router.get("/extension/debug/faces/{face_id}/people-scores", response_model=list[DebugPersonScoreOut])
+def people_scores_for_face(
+    face_id: str,
+    query: str = Query(default="", max_length=120),
+    session: Session = Depends(get_session),
+):
+    face = session.get(DetectedFace, _as_uuid(face_id))
+    if not face:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Face não encontrada",
+        )
+
+    stmt = select(Person).where(Person.status == "ACTIVE")
+    if query.strip():
+        q = f"%{query.strip()}%"
+        stmt = stmt.where(Person.name.ilike(q) | Person.display_name.ilike(q) | Person.slug.ilike(q))
+    people = session.exec(stmt).all()[:12]
+    embedding = normalize_embedding(face.embedding)
+    warning = None if embedding else "Face sem embedding disponível para score."
+
+    out: list[DebugPersonScoreOut] = []
+    for person in people:
+        score: float | None = None
+        person_embeddings = session.exec(
+            select(FaceEmbedding).where(FaceEmbedding.person_id == person.id)
+        ).all()
+        if embedding:
+            scores = [
+                cosine(embedding, normalized)
+                for item in person_embeddings
+                if (normalized := normalize_embedding(item.embedding)) is not None
+            ]
+            if scores:
+                score = max(scores)
+
+        out.append(
+            DebugPersonScoreOut(
+                person_id=str(person.id),
+                name=person.display_name or person.name,
+                slug=person.slug,
+                score=round(score, 4) if score is not None else None,
+                distance=round(1 - score, 4) if score is not None else None,
+                status="DEBUG_SCORE" if score is not None else None,
+                warning=warning if score is None else None,
+            )
+        )
+
+    out.sort(key=lambda item: item.score if item.score is not None else -1, reverse=True)
+    return out
 
 
 @router.post("/extension/analyze-page", response_model=AnalyzePageResponse)

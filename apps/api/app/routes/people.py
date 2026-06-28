@@ -9,6 +9,8 @@ from ..services.audit import write_action
 
 router = APIRouter()
 
+PUBLIC_MATCH_STATUSES = {"APPROVED", "APPROVED_MANUAL", "AUTO_APPROVED"}
+
 
 def _as_uuid(value: str) -> UUID:
     try:
@@ -59,6 +61,7 @@ def person_appearances(slug: str, session: Session = Depends(get_session)):
         select(FaceMatch)
         .join(DetectedFace, FaceMatch.detected_face_id == DetectedFace.id)
         .where(FaceMatch.person_id == person.id)
+        .where(FaceMatch.status.in_(PUBLIC_MATCH_STATUSES))
     ).all()
 
     appearances_by_image: dict[str, dict] = {}
@@ -77,6 +80,10 @@ def person_appearances(slug: str, session: Session = Depends(get_session)):
         if existing is None or match.score > existing["score"]:
             appearances_by_image[image_key] = {
                 "article_id": str(article.id),
+                "article_title": article.title,
+                "article_url": article.url,
+                "article_domain": article.domain,
+                "captured_at": article.captured_at,
                 "image_id": image_key,
                 "image_url": image.image_url,
                 "score": match.score,
@@ -95,6 +102,7 @@ def person_connections(slug: str, session: Session = Depends(get_session)):
         select(DetectedFace.id)
         .join(FaceMatch, FaceMatch.detected_face_id == DetectedFace.id)
         .where(FaceMatch.person_id == person.id)
+        .where(FaceMatch.status.in_(PUBLIC_MATCH_STATUSES))
     ).all()
 
     own_image_ids = set()
@@ -109,6 +117,7 @@ def person_connections(slug: str, session: Session = Depends(get_session)):
             select(FaceMatch)
             .join(DetectedFace, DetectedFace.id == FaceMatch.detected_face_id)
             .where(DetectedFace.article_image_id == image_id)
+            .where(FaceMatch.status.in_(PUBLIC_MATCH_STATUSES))
         ).all()
         image = session.get(ArticleImage, image_id)
         article = session.get(Article, image.article_id) if image else None

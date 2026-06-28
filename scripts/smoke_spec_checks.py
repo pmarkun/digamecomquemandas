@@ -37,6 +37,7 @@ def check_admin_routes() -> None:
         '/login', '/people', '/people/{person_id}/reference-images', '/matches/{match_id}/review',
         '/suggestions/{suggestion_id}/review', '/people/{person_id}/optout',
         '/suggestions', '/matches', '/optout-requests', '/audit-logs', '/allowed-domains',
+        '/people/{person_id}/article-images/{image_id}/discard', '/article-images/{image_id}/faces',
     ]:
         ok(f'admin{route}', f'"{route}"' in text, f'route {route} present')
 
@@ -108,6 +109,26 @@ def check_frontend_contracts() -> None:
 
     admin_page = (ROOT / 'apps/web/app/admin/page.tsx').read_text(encoding='utf-8')
     ok('web.admin.login_uses_fresh_token', 'await loadProtected(out.token)' in admin_page, 'admin carrega dados protegidos com token recém-logado')
+    ok('web.admin.restores_session', 'digaMeAdminToken' in admin_page and 'localStorage.getItem' in admin_page, 'admin restaura sessão do localStorage')
+    ok('web.admin.no_prompt_create_person', 'prompt(' not in admin_page, 'admin usa formulário próprio para criar pessoa')
+    ok('web.admin.review_cards', 'review-card' in admin_page and 'article_title' in admin_page and 'image_url' in admin_page, 'admin mostra contexto visual em sugestões e matches')
+    admin_detail = (ROOT / 'apps/web/app/admin/pessoas/[id]/page.tsx').read_text(encoding='utf-8')
+    ok('web.admin.per_match_reassign', 'reassignTargets' in admin_detail and 'Mover face' in admin_detail, 'reatribuição de face é contextual por match')
+    ok('web.admin.person_back_button', 'Voltar ao admin' in admin_detail, 'edição de pessoa tem botão de voltar')
+    ok('web.admin.discard_person_image', 'Descartar imagem deste perfil' in admin_detail and '/discard' in admin_detail, 'admin pode descartar só a imagem do perfil')
+    ok('web.admin.image_face_detector', 'Detectar faces' in admin_detail and '/article-images/${activeImageMatch.image_id}/faces' in admin_detail, 'imagem ampliada permite detectar e salvar faces')
+    profile_page = (ROOT / 'apps/web/app/pessoa/[slug]/page.tsx').read_text(encoding='utf-8')
+    connections_page = (ROOT / 'apps/web/app/pessoa/[slug]/conexoes/page.tsx').read_text(encoding='utf-8')
+    contest_page = (ROOT / 'apps/web/app/pessoa/[slug]/contestar/page.tsx').read_text(encoding='utf-8')
+    ok('web.public.profile_cards', 'appearance-card' in profile_page and 'score' not in profile_page, 'perfil público usa cards e esconde score técnico')
+    ok('web.public.connections_no_score', 'last_score' not in connections_page and 'score' not in connections_page, 'conexões públicas escondem score técnico')
+    ok('web.public.contest_feedback', 'success' in contest_page and 'Preencha nome' in contest_page, 'contestação tem validação e feedback')
+
+    people_routes = (ROOT / 'apps/api/app/routes/people.py').read_text(encoding='utf-8')
+    ok('api.public.safe_match_statuses', 'PUBLIC_MATCH_STATUSES' in people_routes and 'FaceMatch.status.in_(PUBLIC_MATCH_STATUSES)' in people_routes, 'páginas públicas filtram só matches aprovados')
+    admin_routes = (ROOT / 'apps/api/app/routes/admin.py').read_text(encoding='utf-8')
+    ok('api.admin.enriched_queues', '_match_payload' in admin_routes and '_suggestion_payload' in admin_routes and 'image_width' in admin_routes, 'filas admin retornam contexto de imagem/matéria')
+    ok('api.admin.slug_normalizes_accents', 'unicodedata.normalize' in admin_routes and '_slugify(suggestion.suggested_name)' in admin_routes, 'slug de sugestão remove acentos')
 
 
 def check_extension_contracts() -> None:
@@ -116,6 +137,9 @@ def check_extension_contracts() -> None:
     popup = (ROOT / 'apps/extension/src/popup/popup.ts').read_text(encoding='utf-8')
     manifest = (ROOT / 'apps/extension/manifest.json').read_text(encoding='utf-8')
     schemas = (ROOT / 'apps/api/app/schemas.py').read_text(encoding='utf-8')
+    extension_routes = (ROOT / 'apps/api/app/routes/extension.py').read_text(encoding='utf-8')
+    discovery_service = (ROOT / 'apps/api/app/services/article_image_discovery.py').read_text(encoding='utf-8')
+    web_home = (ROOT / 'apps/web/app/page.tsx').read_text(encoding='utf-8')
     extension_pkg = (ROOT / 'apps/extension/package.json').read_text(encoding='utf-8')
 
     ok('extension.allowlist_fallback', 'ALLOWLIST_FALLBACK' in content, 'has fallback local')
@@ -126,10 +150,21 @@ def check_extension_contracts() -> None:
     ok('extension.faceapi_models_packaged', (ROOT / 'apps/extension/public/models/tiny_face_detector_model-weights_manifest.json').exists() and (ROOT / 'apps/extension/public/models/tiny_face_detector_model-shard1').exists(), 'modelos locais do tiny face detector existem')
     ok('extension.models_web_accessible', 'models/*' in manifest, 'modelos expostos como web_accessible_resources')
     ok('api.client_faces_contract', 'class DetectedFaceIn' in schemas and 'faces: list[DetectedFaceIn]' in schemas, 'API aceita faces detectadas no cliente')
-    ok('extension.overlay_for_detected_faces', 'if (entryFaces.length > 0)' in content, 'overlay é criado para faces detectadas')
-    ok('extension.unmatched_face_copy', 'Pessoa não identificada' in content, 'faces sem match aparecem como pessoa não identificada')
+    ok('extension.sidebar_for_detected_images', 'SIDEBAR_ID' in content and 'ensureSidebar' in content, 'sidebar é criada para imagens detectadas')
+    ok('extension.incremental_image_scan', 'MutationObserver' in content and 'scheduleScan' in content, 'novas imagens carregadas entram na análise')
+    ok('extension.unmatched_face_copy', 'Sem match automático' in content, 'faces sem match aparecem para sugestão manual')
     ok('extension.submit_suggestion', 'SUBMIT_SUGGESTION' in content and 'suggested_name' in content, 'usuário consegue sugerir identificação')
     ok('extension.popup_disable_site', 'disabledSites' in popup and 'Desativar neste site' in popup, 'popup permite desativar domínio atual')
+    ok('article_discovery.route', '"/extension/discover-article-images"' in extension_routes, 'API expõe descoberta de imagens de matéria')
+    ok('article_discovery.allowlist', 'descoberta bloqueada' in extension_routes and '_is_allowed' in extension_routes, 'descoberta respeita allowlist')
+    ok('article_discovery.heuristics', 'BLOCKED_IMAGE_HINTS' in discovery_service and 'ARTICLE_IMAGE_HINTS' in discovery_service, 'serviço filtra logos e prioriza imagens jornalísticas')
+    ok('article_discovery.browser_optional', 'discover_article_images_browser' in discovery_service and 'playwright.sync_api' in discovery_service, 'serviço suporta renderização opcional com navegador')
+    ok('web.article_url_input', '/extension/discover-article-images' in web_home and 'isLikelyImageUrl' in web_home, 'bancada web aceita URL de matéria automaticamente')
+    ok('article_discovery.small_images', 'width < 360' in discovery_service and 'small_image' in discovery_service, 'crawler ignora thumbnails pequenas')
+    ok('article_discovery.ignored_debug', 'ignored_images' in schemas and 'payload.debug' in extension_routes, 'API retorna imagens ignoradas só em debug')
+    ok('debug.face_scores', '/extension/debug/faces/{face_id}/people-scores' in extension_routes and 'cosine' in extension_routes, 'API calcula score por face para autocomplete debug')
+    ok('web.debug_toggle', 'Debug' in web_home and 'debugEnabled' in web_home and 'debug-panel' in web_home, 'home tem modo debug')
+    ok('web.inline_curation', 'inline-suggestion-form' in web_home and 'curation-face-list' in web_home, 'curadoria usa inputs inline por face')
 
 
 def main() -> int:

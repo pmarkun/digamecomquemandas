@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 
 type Person = {
@@ -28,13 +28,26 @@ type ReferenceImage = {
 type Match = {
   id: string;
   detected_face_id: string;
+  image_id?: string;
   score: number;
   status: string;
   bbox?: { x: number; y: number; w: number; h: number };
   image_url?: string;
+  image_width?: number;
+  image_height?: number;
   article_id?: string;
   article_title?: string;
   article_url?: string;
+};
+
+type DetectedFacePayload = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  score?: number;
+  embedding?: number[];
+  embedding_model?: string;
 };
 
 type Detail = {
@@ -43,13 +56,109 @@ type Detail = {
   matches: Match[];
 };
 
+let faceModelLoad: Promise<unknown> | null = null;
+
+function proxiedImageUrl(url: string) {
+  return `/api/image-proxy?url=${encodeURIComponent(url)}`;
+}
+
+async function loadFaceModels() {
+  const faceapi = await import('face-api.js');
+  if (!faceModelLoad) {
+    faceModelLoad = Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+    ]);
+  }
+  await faceModelLoad;
+  return faceapi;
+}
+
+function facePayloadFromDetection(detection: unknown, image: HTMLImageElement): DetectedFacePayload | null {
+  const naturalWidth = image.naturalWidth || 1;
+  const naturalHeight = image.naturalHeight || 1;
+  const candidate = detection as {
+    detection?: { box?: { x: number; y: number; width: number; height: number }; score?: number; imageWidth?: number; imageHeight?: number };
+    box?: { x: number; y: number; width: number; height: number };
+    score?: number;
+    imageWidth?: number;
+    imageHeight?: number;
+    descriptor?: Float32Array | number[];
+  };
+  const source = candidate.detection || candidate;
+  const box = source.box;
+  if (!box) return null;
+
+  const sourceWidth = source.imageWidth || naturalWidth;
+  const sourceHeight = source.imageHeight || naturalHeight;
+  const scaleX = naturalWidth / sourceWidth;
+  const scaleY = naturalHeight / sourceHeight;
+  const x = Math.max(0, Number(box.x) * scaleX);
+  const y = Math.max(0, Number(box.y) * scaleY);
+  const w = Math.min(Math.max(0, Number(box.width) * scaleX), naturalWidth - x);
+  const h = Math.min(Math.max(0, Number(box.height) * scaleY), naturalHeight - y);
+  if (![x, y, w, h].every(Number.isFinite) || w < 18 || h < 18) return null;
+
+  const descriptor = candidate.descriptor ? Array.from(candidate.descriptor).map(Number) : undefined;
+  return {
+    x,
+    y,
+    w,
+    h,
+    score: typeof source.score === 'number' ? source.score : undefined,
+    ...(descriptor?.length === 128 ? { embedding: descriptor, embedding_model: 'face-api.js/faceRecognitionNet' } : {}),
+  };
+}
+
+async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFacePayload[]> {
+  const faceapi = await loadFaceModels();
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+  try {
+    const detections = await faceapi.detectAllFaces(image, options).withFaceLandmarks(true).withFaceDescriptors();
+    return detections
+      .map((detection: unknown) => facePayloadFromDetection(detection, image))
+      .filter(Boolean) as DetectedFacePayload[];
+  } catch (_error: unknown) {
+    const detections = await faceapi.detectAllFaces(image, options);
+    return detections
+      .map((detection: unknown) => facePayloadFromDetection(detection, image))
+      .filter(Boolean) as DetectedFacePayload[];
+  }
+}
+
+function bboxOverlayStyle(
+  bbox: { x: number; y: number; w: number; h: number },
+  naturalSize: { width: number; height: number },
+) {
+  const width = naturalSize.width || 1;
+  const height = naturalSize.height || 1;
+  const left = Math.max(0, (bbox.x / width) * 100);
+  const top = Math.max(0, (bbox.y / height) * 100);
+  const boxWidth = Math.min(100 - left, (bbox.w / width) * 100);
+  const boxHeight = Math.min(100 - top, (bbox.h / height) * 100);
+  return {
+    left: `${left}%`,
+    top: `${top}%`,
+    width: `${Math.max(2, boxWidth)}%`,
+    height: `${Math.max(2, boxHeight)}%`,
+  };
+}
+
 export default function AdminPersonPage({ params }: { params: { id: string } }) {
+  const modalImageRef = useRef<HTMLImageElement | null>(null);
   const [token, setToken] = useState('');
   const [detail, setDetail] = useState<Detail | null>(null);
   const [feedback, setFeedback] = useState('');
-  const [targetPersonId, setTargetPersonId] = useState('');
+  const [reassignTargets, setReassignTargets] = useState<Record<string, string>>({});
   const [people, setPeople] = useState<Person[]>([]);
   const [referenceUrl, setReferenceUrl] = useState('');
+  const [activeImageMatch, setActiveImageMatch] = useState<Match | null>(null);
+  const [modalNaturalSize, setModalNaturalSize] = useState({ width: 0, height: 0 });
+  const [detectedFaces, setDetectedFaces] = useState<DetectedFacePayload[]>([]);
+  const [detectedFaceTargets, setDetectedFaceTargets] = useState<Record<number, string>>({});
+  const [modalFeedback, setModalFeedback] = useState('');
+  const [detecting, setDetecting] = useState(false);
 
   const headersFor = (authToken = token) => ({ Authorization: `Bearer ${authToken}` });
 
@@ -96,13 +205,90 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
     await loadDetail();
   };
 
-  const reassignMatch = async (matchId: string) => {
+  const reassignMatch = async (match: Match) => {
+    const targetPersonId = reassignTargets[match.id] || '';
     if (!targetPersonId) {
       setFeedback('Escolha a pessoa correta antes de mover a face.');
       return;
     }
-    await api.post(`/admin/matches/${matchId}/reassign`, { person_id: targetPersonId, status: 'APPROVED' }, headersFor());
+    const target = people.find((person) => person.id === targetPersonId);
+    const targetName = target?.display_name || target?.name || targetPersonId;
+    if (!confirm(`Mover esta face de "${match.article_title || 'matéria sem título'}" para ${targetName}?`)) {
+      return;
+    }
+    await api.post(`/admin/matches/${match.id}/reassign`, { person_id: targetPersonId, status: 'APPROVED' }, headersFor());
     setFeedback('Face reatribuída para curadoria do modelo.');
+    await loadDetail();
+  };
+
+  const discardImageForPerson = async (match: Match) => {
+    if (!match.image_id) {
+      setFeedback('Esta ocorrência não tem ID de imagem para descarte.');
+      return;
+    }
+    if (!confirm(`Descartar esta imagem do perfil de ${detail?.person.display_name || 'pessoa'}?`)) {
+      return;
+    }
+    await api.post(`/admin/people/${params.id}/article-images/${match.image_id}/discard`, {}, headersFor());
+    setFeedback('Imagem descartada deste perfil.');
+    await loadDetail();
+  };
+
+  const openImageModal = (match: Match) => {
+    setActiveImageMatch(match);
+    setModalNaturalSize({ width: match.image_width || 0, height: match.image_height || 0 });
+    setDetectedFaces([]);
+    setDetectedFaceTargets({});
+    setModalFeedback('Clique em "Detectar faces" para procurar novas pessoas nesta imagem.');
+  };
+
+  const runDetectorOnModalImage = async () => {
+    const image = modalImageRef.current;
+    if (!image) {
+      setModalFeedback('Imagem ainda não carregada.');
+      return;
+    }
+    setDetecting(true);
+    setModalFeedback('Detectando faces no navegador...');
+    try {
+      const faces = await detectFacesForImage(image);
+      setDetectedFaces(faces);
+      setDetectedFaceTargets({});
+      setModalFeedback(
+        faces.length
+          ? `${faces.length} face(s) detectada(s). Escolha pessoas para vincular ou salve sem pessoa para tentar match automático.`
+          : 'Nenhuma face nova detectada nesta imagem.',
+      );
+    } catch (error: unknown) {
+      setModalFeedback(error instanceof Error ? error.message : 'Falha ao detectar faces nesta imagem.');
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const saveDetectedFaces = async () => {
+    if (!activeImageMatch?.image_id || detectedFaces.length === 0) {
+      setModalFeedback('Não há faces detectadas para salvar.');
+      return;
+    }
+    const out = await api.post<{
+      created_faces: number;
+      reused_faces: number;
+      manual_matches: number;
+      automatic_matches: number;
+    }>(
+      `/admin/article-images/${activeImageMatch.image_id}/faces`,
+      {
+        faces: detectedFaces.map((face, index) => ({
+          ...face,
+          person_id: detectedFaceTargets[index] || null,
+        })),
+      },
+      headersFor(),
+    );
+    setModalFeedback(
+      `Salvo: ${out.created_faces} face(s) nova(s), ${out.reused_faces} reutilizada(s), ${out.manual_matches} vínculo(s) manual(is), ${out.automatic_matches} match(es) automático(s).`,
+    );
     await loadDetail();
   };
 
@@ -138,6 +324,10 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
           <div>
             <p className="eyebrow">Curadoria de pessoa</p>
             <h1 className="admin-title">{detail.person.display_name}</h1>
+          </div>
+          <div className="toolbar">
+            <a className="button secondary" href="/admin">Voltar ao admin</a>
+            <a className="button secondary" href={`/pessoa/${detail.person.slug}`}>Perfil público</a>
           </div>
         </section>
         {feedback && <p className="feedback">{feedback}</p>}
@@ -181,24 +371,38 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
 
           <section className="panel wide">
             <h2>Matérias e faces associadas</h2>
-            <div className="toolbar">
-              <input className="input" list="people-reassign" value={targetPersonId} onChange={(event) => setTargetPersonId(event.target.value)} placeholder="ID da pessoa correta" />
-              <datalist id="people-reassign">
-                {people.map((person) => (
-                  <option key={person.id} value={person.id}>{person.display_name || person.name}</option>
-                ))}
-              </datalist>
-            </div>
             <div className="match-grid">
               {detail.matches.map((match) => (
                 <article className="match-card" key={match.id}>
-                  {match.image_url && <img src={match.image_url} alt="" />}
+                  {match.image_url && (
+                    <button className="image-open-button" type="button" onClick={() => openImageModal(match)}>
+                      <img src={match.image_url} alt="" />
+                      <span>Ampliar e detectar faces</span>
+                    </button>
+                  )}
                   <div>
                     <strong>{match.article_title || 'Matéria sem título'}</strong>
                     <p>{match.article_url}</p>
                     <p>Score {match.score.toFixed(3)} · <span className="badge">{match.status}</span></p>
                     {match.bbox && <p>Face: x {Math.round(match.bbox.x)}, y {Math.round(match.bbox.y)}, w {Math.round(match.bbox.w)}, h {Math.round(match.bbox.h)}</p>}
-                    <button className="button secondary" type="button" onClick={() => reassignMatch(match.id)}>Mover face para pessoa escolhida</button>
+                    <div className="match-reassign">
+                      <select
+                        className="input"
+                        value={reassignTargets[match.id] || ''}
+                        onChange={(event) => setReassignTargets({ ...reassignTargets, [match.id]: event.target.value })}
+                      >
+                        <option value="">Mover para...</option>
+                        {people
+                          .filter((person) => person.id !== detail.person.id)
+                          .map((person) => (
+                            <option key={person.id} value={person.id}>{person.display_name || person.name} · {person.slug}</option>
+                          ))}
+                      </select>
+                      <button className="button secondary" type="button" onClick={() => reassignMatch(match)}>Mover face</button>
+                    </div>
+                    <div className="toolbar">
+                      <button className="button secondary" type="button" onClick={() => discardImageForPerson(match)}>Descartar imagem deste perfil</button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -207,6 +411,81 @@ export default function AdminPersonPage({ params }: { params: { id: string } }) 
           </section>
         </div>
       </div>
+      {activeImageMatch?.image_url && (
+        <div className="image-modal-backdrop" role="dialog" aria-modal="true" aria-label="Ampliar imagem para detectar faces">
+          <section className="image-modal">
+            <div className="toolbar split">
+              <div>
+                <p className="eyebrow">Imagem da matéria</p>
+                <h2>{activeImageMatch.article_title || 'Matéria sem título'}</h2>
+              </div>
+              <button className="button secondary" type="button" onClick={() => setActiveImageMatch(null)}>Fechar</button>
+            </div>
+            <div className="image-modal-layout">
+              <div className="image-modal-stage">
+                <div className="image-modal-wrap">
+                  <img
+                    ref={modalImageRef}
+                    src={proxiedImageUrl(activeImageMatch.image_url)}
+                    alt=""
+                    onLoad={(event) => {
+                      setModalNaturalSize({
+                        width: event.currentTarget.naturalWidth,
+                        height: event.currentTarget.naturalHeight,
+                      });
+                    }}
+                  />
+                  {activeImageMatch.bbox && (
+                    <span
+                      className="modal-face-box existing"
+                      style={bboxOverlayStyle(activeImageMatch.bbox, modalNaturalSize)}
+                    >
+                      atual
+                    </span>
+                  )}
+                  {detectedFaces.map((face, index) => (
+                    <span
+                      className="modal-face-box detected"
+                      key={`${face.x}-${face.y}-${index}`}
+                      style={bboxOverlayStyle(face, modalNaturalSize)}
+                    >
+                      {index + 1}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <aside className="image-modal-side">
+                <button className="button" type="button" onClick={runDetectorOnModalImage} disabled={detecting}>
+                  {detecting ? 'Detectando...' : 'Detectar faces'}
+                </button>
+                <p className="status-line">{modalFeedback}</p>
+                {detectedFaces.length > 0 && (
+                  <div className="detected-face-list">
+                    {detectedFaces.map((face, index) => (
+                      <label className="detected-face-row" key={`${face.x}-${face.y}-${index}`}>
+                        <span>Face {index + 1}{face.score ? ` · ${Math.round(face.score * 100)}%` : ''}</span>
+                        <select
+                          className="input"
+                          value={detectedFaceTargets[index] || ''}
+                          onChange={(event) => setDetectedFaceTargets({ ...detectedFaceTargets, [index]: event.target.value })}
+                        >
+                          <option value="">Sem pessoa definida</option>
+                          {people.map((person) => (
+                            <option key={person.id} value={person.id}>{person.display_name || person.name} · {person.slug}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                    <button className="button secondary" type="button" onClick={saveDetectedFaces}>
+                      Salvar faces detectadas
+                    </button>
+                  </div>
+                )}
+              </aside>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

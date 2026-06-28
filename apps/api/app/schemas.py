@@ -15,6 +15,14 @@ class DetectedFaceIn(BaseModel):
     embedding_model: str | None = None
 
 
+class AdminDetectedFaceIn(DetectedFaceIn):
+    person_id: UUID | None = None
+
+
+class AdminAddFacesIn(BaseModel):
+    faces: list[AdminDetectedFaceIn]
+
+
 class AnalyzeImage(BaseModel):
     image_url: str
     width: int | None = None
@@ -61,6 +69,44 @@ class AnalyzePageResponse(BaseModel):
     article_id: str
     results: List[AnalyzeImageOut]
     warnings: list[str] = Field(default_factory=list)
+
+
+class DiscoverArticleImagesRequest(BaseModel):
+    page_url: str
+    render_browser: bool | None = None
+    max_images: int | None = Field(default=None, ge=1, le=40)
+    debug: bool = False
+
+
+class ArticleImageCandidate(BaseModel):
+    image_url: str
+    width: int | None = None
+    height: int | None = None
+    alt: str | None = None
+    source: str = "html"
+    score: float
+
+
+class IgnoredArticleImageCandidate(ArticleImageCandidate):
+    reason: str
+
+
+class DiscoverArticleImagesResponse(BaseModel):
+    page_url: str
+    title: str | None = None
+    images: list[ArticleImageCandidate]
+    ignored_images: list[IgnoredArticleImageCandidate] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DebugPersonScoreOut(BaseModel):
+    person_id: str
+    name: str
+    slug: str
+    score: float | None = None
+    distance: float | None = None
+    status: str | None = None
+    warning: str | None = None
 
 
 class PersonCreate(BaseModel):
