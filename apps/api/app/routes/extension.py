@@ -88,18 +88,54 @@ def _clamp_face(face, width: int | None, height: int | None) -> dict | None:
     }
 
 
-def _faces_for_image(item, image: ArticleImage) -> list[dict]:
+def _bbox_iou(first: dict, second: dict) -> float:
+    left = max(float(first.get("x", 0)), float(second.get("x", 0)))
+    top = max(float(first.get("y", 0)), float(second.get("y", 0)))
+    right = min(
+        float(first.get("x", 0)) + float(first.get("w", 0)),
+        float(second.get("x", 0)) + float(second.get("w", 0)),
+    )
+    bottom = min(
+        float(first.get("y", 0)) + float(first.get("h", 0)),
+        float(second.get("y", 0)) + float(second.get("h", 0)),
+    )
+    intersection = max(0.0, right - left) * max(0.0, bottom - top)
+    if intersection <= 0:
+        return 0.0
+
+    first_area = max(0.0, float(first.get("w", 0))) * max(0.0, float(first.get("h", 0)))
+    second_area = max(0.0, float(second.get("w", 0))) * max(0.0, float(second.get("h", 0)))
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def _faces_for_image(item, image: ArticleImage, content: bytes | None = None) -> list[dict]:
+    image_width = image.width or item.width
+    image_height = image.height or item.height
     if item.faces is not None:
         return [
             normalized
             for face in item.faces
-            if (normalized := _clamp_face(face, image.width, image.height)) is not None
+            if (normalized := _clamp_face(face, image_width, image_height)) is not None
         ]
 
     return [
-        {"bbox": vars(face.bbox), "quality_score": None}
-        for face in detect_faces(image.width, image.height)
+        {
+            "bbox": vars(face.bbox),
+            "quality_score": face.score,
+            "embedding": normalize_embedding(face.embedding),
+            "embedding_model": face.embedding_model,
+        }
+        for face in detect_faces(content, image_width, image_height)
     ]
+
+
+def _is_placeholder_face(face: DetectedFace) -> bool:
+    return face.embedding is None and face.embedding_vector is None and face.quality_score is None
+
+
+def _is_faceapi_face(face: DetectedFace) -> bool:
+    return face.model_name == "face-api.js/faceRecognitionNet"
 
 
 def _serialize_face(session: Session, detected: DetectedFace, person_map: dict[str, Person]) -> FaceOut:
@@ -348,8 +384,9 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
     person_map: dict[str, Person] = {}
 
     for item in payload.images:
-        fetched = fetch_image(item.image_url, item.width, item.height)
-        image_hash = fetched.sha256 or hash_sha256(item.image_url)
+        client_sent_faces = item.faces is not None
+        fetched = None if client_sent_faces else fetch_image(item.image_url, item.width, item.height)
+        image_hash = fetched.sha256 if fetched and fetched.sha256 else hash_sha256(item.image_url)
         image = session.exec(
             select(ArticleImage).where(
                 and_(ArticleImage.sha256 == image_hash, ArticleImage.article_id == article.id)
@@ -361,63 +398,78 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
                 article_id=article.id,
                 image_url=item.image_url,
                 sha256=image_hash,
-                phash=fetched.phash,
-                width=fetched.width or item.width,
-                height=fetched.height or item.height,
+                phash=fetched.phash if fetched else None,
+                width=(fetched.width if fetched else None) or item.width,
+                height=(fetched.height if fetched else None) or item.height,
             )
             session.add(image)
             session.flush()
-            process_image = True
         else:
-            process_image = False
+            image.image_url = item.image_url
+            image.width = (fetched.width if fetched else None) or item.width or image.width
+            image.height = (fetched.height if fetched else None) or item.height or image.height
+            if fetched and fetched.phash:
+                image.phash = fetched.phash
+            session.add(image)
 
         faces_payload: list[FaceOut] = []
-        if process_image:
-            if not fetched.ok:
+        existing_faces = session.exec(
+            select(DetectedFace).where(DetectedFace.article_image_id == image.id)
+        ).all()
+        active_existing_faces = [
+            face
+            for face in existing_faces
+            if _is_faceapi_face(face)
+            and not _is_placeholder_face(face)
+        ]
+        if client_sent_faces:
+            incoming_faces = _faces_for_image(item, image, None)
+        else:
+            incoming_faces = _faces_for_image(item, image, fetched.content if fetched else None)
+            if fetched and not fetched.ok:
                 warnings.append(f"Imagem não baixada; usando metadados enviados: {item.image_url}")
 
-            for face in _faces_for_image(item, image):
-                embed = face.get("embedding")
-                detected = DetectedFace(
-                    article_image_id=image.id,
-                    bbox=face["bbox"],
-                    embedding=embed,
-                    embedding_vector=embed,
-                    quality_score=face["quality_score"],
-                    model_name=face.get("embedding_model") or "face-api.js",
-                    model_version="0.1",
+        for face in incoming_faces:
+            if any(_bbox_iou(existing_face.bbox, face["bbox"]) >= 0.75 for existing_face in active_existing_faces):
+                continue
+
+            embed = face.get("embedding")
+            detected = DetectedFace(
+                article_image_id=image.id,
+                bbox=face["bbox"],
+                embedding=embed,
+                embedding_vector=embed,
+                quality_score=face["quality_score"],
+                model_name=face.get("embedding_model") or "face-api.js/faceRecognitionNet",
+                model_version="0.1",
+            )
+            session.add(detected)
+            session.flush()
+            active_existing_faces.append(detected)
+
+            candidate_matches = match_candidates(session, embed, person_embeddings) if embed else []
+            auto_approve = _should_auto_approve(candidate_matches)
+            for index, item_match in enumerate(candidate_matches):
+                person_key = str(item_match["person_id"])
+                person_obj = person_map.get(person_key)
+                if person_obj is None:
+                    person_obj = session.get(Person, item_match["person_id"])
+                    if person_obj:
+                        person_map[person_key] = person_obj
+
+                if not _is_active_person(person_obj):
+                    continue
+
+                m = FaceMatch(
+                    detected_face_id=detected.id,
+                    person_id=item_match["person_id"],
+                    score=item_match["score"],
+                    distance=item_match["distance"],
+                    status="AUTO_APPROVED" if auto_approve and index == 0 else "AUTO",
                 )
-                session.add(detected)
-                session.flush()
-
-                candidate_matches = match_candidates(session, embed, person_embeddings) if embed else []
-                auto_approve = _should_auto_approve(candidate_matches)
-                for index, item_match in enumerate(candidate_matches):
-                    person_key = str(item_match["person_id"])
-                    person_obj = person_map.get(person_key)
-                    if person_obj is None:
-                        person_obj = session.get(Person, item_match["person_id"])
-                        if person_obj:
-                            person_map[person_key] = person_obj
-
-                    if not _is_active_person(person_obj):
-                        continue
-
-                    m = FaceMatch(
-                        detected_face_id=detected.id,
-                        person_id=item_match["person_id"],
-                        score=item_match["score"],
-                        distance=item_match["distance"],
-                        status="AUTO_APPROVED" if auto_approve and index == 0 else "AUTO",
-                    )
-                    session.add(m)
-
-                faces_payload.append(_serialize_face(session, detected, person_map))
-        else:
-            for existing_face in session.exec(
-                select(DetectedFace).where(DetectedFace.article_image_id == image.id)
-            ).all():
-                faces_payload.append(_serialize_face(session, existing_face, person_map))
+                session.add(m)
+        for existing_face in active_existing_faces:
+            faces_payload.append(_serialize_face(session, existing_face, person_map))
 
         results.append(
             AnalyzeImageOut(

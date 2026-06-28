@@ -98,6 +98,27 @@ def init_db() -> None:
                     "ON faceembedding USING ivfflat (embedding_vector vector_cosine_ops) WITH (lists = 10)"
                 )
             )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_articleimage_article_id ON articleimage (article_id)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_detectedface_article_image_id ON detectedface (article_image_id)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_facematch_person_status ON facematch (person_id, status)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_facematch_detected_face_status ON facematch (detected_face_id, status)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_bootstraprunarticle_run_id ON bootstraprunarticle (run_id)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_bootstraprunarticle_article_id ON bootstraprunarticle (article_id)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_bootstraprunarticle_article_url ON bootstraprunarticle (article_url)")
+            )
 
 
 def get_session():

@@ -3,7 +3,7 @@
   "name": "diga-me",
   "description": "Possíveis identificações em notícias de portais autorizados",
   "version": "0.1.0",
-  "permissions": ["storage", "activeTab", "tabs", "scripting", "alarms", "notifications"],
+  "permissions": ["storage", "activeTab", "tabs", "scripting", "alarms", "notifications", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "dist/background.js",
@@ -22,7 +22,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["models/*"],
+      "resources": ["dist/models/*"],
       "matches": ["<all_urls>"]
     }
   ]

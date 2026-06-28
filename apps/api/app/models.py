@@ -42,9 +42,36 @@ class Article(SQLModel, table=True):
     images: List["ArticleImage"] = Relationship(back_populates="article")
 
 
+class BootstrapRun(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    status: str = Field(default="DISCOVERING", index=True)
+    limit_per_source: int = 10
+    render_browser: bool = True
+    warnings: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class BootstrapRunArticle(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    run_id: UUID = Field(foreign_key="bootstraprun.id", index=True)
+    source: str = Field(index=True)
+    domain: str
+    section_url: str
+    article_url: str
+    title: Optional[str] = None
+    status: str = Field(default="DISCOVERED", index=True)
+    article_id: Optional[UUID] = Field(default=None, foreign_key="article.id", index=True)
+    image_count: int = 0
+    face_count: int = 0
+    warnings: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class ArticleImage(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    article_id: UUID = Field(foreign_key="article.id")
+    article_id: UUID = Field(foreign_key="article.id", index=True)
     image_url: str
     sha256: Optional[str] = None
     phash: Optional[str] = None
@@ -77,7 +104,7 @@ class Person(SQLModel, table=True):
 
 class PersonReferenceImage(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    person_id: UUID = Field(foreign_key="person.id")
+    person_id: UUID = Field(foreign_key="person.id", index=True)
     source_url: str
     storage_path: Optional[str] = None
     sha256: Optional[str] = None
@@ -91,7 +118,7 @@ class PersonReferenceImage(SQLModel, table=True):
 
 class FaceEmbedding(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    person_id: UUID = Field(foreign_key="person.id")
+    person_id: UUID = Field(foreign_key="person.id", index=True)
     reference_image_id: UUID = Field(foreign_key="personreferenceimage.id")
     embedding: List[float] = Field(default_factory=list, sa_column=Column(JSON))
     embedding_vector: Optional[List[float]] = Field(default=None, sa_column=Column(EmbeddingVector()))
@@ -106,7 +133,7 @@ class FaceEmbedding(SQLModel, table=True):
 
 class DetectedFace(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    article_image_id: UUID = Field(foreign_key="articleimage.id")
+    article_image_id: UUID = Field(foreign_key="articleimage.id", index=True)
     bbox: Dict[str, float] = Field(sa_column=Column(JSON))
     embedding: Optional[List[float]] = Field(default=None, sa_column=Column(JSON))
     embedding_vector: Optional[List[float]] = Field(default=None, sa_column=Column(EmbeddingVector()))
@@ -122,11 +149,11 @@ class DetectedFace(SQLModel, table=True):
 
 class FaceMatch(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    detected_face_id: UUID = Field(foreign_key="detectedface.id")
-    person_id: UUID = Field(foreign_key="person.id")
+    detected_face_id: UUID = Field(foreign_key="detectedface.id", index=True)
+    person_id: UUID = Field(foreign_key="person.id", index=True)
     score: float
     distance: Optional[float] = None
-    status: str = Field(default="AUTO")
+    status: str = Field(default="AUTO", index=True)
     reviewed_by: Optional[UUID] = None
     reviewed_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utc_now)

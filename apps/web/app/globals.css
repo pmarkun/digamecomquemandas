@@ -1125,6 +1125,117 @@ button {
   margin: 0.25rem 0 0;
 }
 
+.influence-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  margin-top: 1.5rem;
+}
+
+.influence-graph-panel,
+.influence-side-panel {
+  background: rgba(255, 250, 240, 0.72);
+  border: 1px solid #2b2b2b;
+}
+
+.influence-graph-panel {
+  min-height: 560px;
+  overflow: hidden;
+}
+
+.influence-graph {
+  background:
+    linear-gradient(90deg, rgba(25, 25, 25, 0.04) 1px, transparent 1px),
+    linear-gradient(rgba(25, 25, 25, 0.035) 1px, transparent 1px),
+    #f8ead1;
+  background-size: 28px 28px;
+  display: block;
+  height: min(68vh, 640px);
+  min-height: 520px;
+  width: 100%;
+}
+
+.influence-edge {
+  stroke: #16697a;
+  stroke-linecap: round;
+}
+
+.influence-center circle {
+  fill: url(#centerGlow);
+  stroke: #191919;
+  stroke-width: 2;
+}
+
+.influence-center text,
+.influence-node text {
+  fill: #191919;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 14px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.influence-center text:last-child,
+.influence-node text:last-child {
+  fill: #6b6258;
+  font-size: 12px;
+}
+
+.influence-node circle {
+  fill: #fffaf0;
+  stroke: #d94a38;
+  stroke-width: 2;
+  transition:
+    fill 120ms ease,
+    stroke 120ms ease,
+    transform 120ms ease;
+}
+
+.influence-node:hover circle {
+  fill: #ffe3d4;
+  stroke: #191919;
+}
+
+.influence-side-panel {
+  align-self: start;
+  display: grid;
+  gap: 0.8rem;
+  max-height: calc(100vh - 9rem);
+  overflow: auto;
+  padding: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.influence-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.influence-card .button,
+.influence-card > .badge {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.influence-strength {
+  align-items: center;
+  background: linear-gradient(90deg, #d94a38 var(--strength), #f4ead9 var(--strength));
+  border: 1px solid #191919;
+  display: flex;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 800;
+  height: 34px;
+  justify-content: center;
+  min-width: 64px;
+  padding: 0 0.55rem;
+}
+
+.influence-strength span {
+  background: #fffaf0;
+  border: 1px solid rgba(25, 25, 25, 0.2);
+  padding: 0.08rem 0.35rem;
+}
+
 .empty-panel,
 .profile-note {
   background: #fff4dd;
@@ -1238,6 +1349,67 @@ button {
   padding: 0.75rem;
 }
 
+.inline-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.checkline {
+  align-items: center;
+  display: flex;
+  gap: 0.45rem;
+}
+
+.bootstrap-article-grid,
+.bootstrap-group-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.bootstrap-article {
+  align-items: start;
+  background: #fffaf0;
+  border: 1px solid #2b2b2b;
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 0.75rem;
+}
+
+.bootstrap-article strong,
+.bootstrap-article small {
+  overflow-wrap: anywhere;
+}
+
+.bootstrap-group {
+  background: #fffaf0;
+  border: 1px solid #2b2b2b;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+}
+
+.bootstrap-face-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bootstrap-face {
+  background: #eadcc7;
+  border: 1px solid rgba(25, 25, 25, 0.24);
+  display: block;
+  height: 72px;
+  overflow: hidden;
+  position: relative;
+  width: 72px;
+}
+
+.bootstrap-face img {
+  display: block;
+  max-width: none;
+}
+
 @media (max-width: 840px) {
   .home-hero,
   .home-grid,
@@ -1250,11 +1422,16 @@ button {
   .review-card,
   .people-row,
   .connection-card,
+  .influence-layout,
   .image-modal-layout,
   .profile-summary,
   .contest-layout,
   .review-url-form,
   .review-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .bootstrap-article {
     grid-template-columns: 1fr;
   }
 
@@ -1276,6 +1453,15 @@ button {
   .correction-panel {
     max-height: none;
     position: static;
+  }
+
+  .influence-side-panel {
+    max-height: none;
+    position: static;
+  }
+
+  .influence-graph {
+    height: 520px;
   }
 
   .admin-header {

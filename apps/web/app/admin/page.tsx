@@ -311,6 +311,7 @@ export default function AdminPage() {
         <nav className="navline">
           <a href="/">Home</a>
           <a href="/admin">Admin</a>
+          <a href="/admin/bootstrap">Bootstrap</a>
         </nav>
       </header>
 

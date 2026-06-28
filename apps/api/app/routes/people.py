@@ -4,7 +4,7 @@ from uuid import UUID
 
 from ..db import get_session
 from ..models import Article, ArticleImage, DetectedFace, FaceMatch, OptoutRequest, Person, AllowedDomain, FaceEmbedding
-from ..schemas import ContestRequest
+from ..schemas import ContestRequest, InfluenceGraphOut
 from ..services.audit import write_action
 
 router = APIRouter()
@@ -175,6 +175,180 @@ def person_connections(slug: str, session: Session = Depends(get_session)):
         }
         for item in coappear.values()
     ]
+
+
+@router.get("/people/{slug}/influence-graph", response_model=InfluenceGraphOut)
+def person_influence_graph(slug: str, limit: int = 40, session: Session = Depends(get_session)):
+    person = session.exec(select(Person).where(Person.slug == slug)).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Pessoa não encontrada")
+
+    center = {
+        "id": str(person.id),
+        "slug": person.slug,
+        "name": person.name,
+        "display_name": person.display_name,
+    }
+    if not person.is_public_figure or person.status != "ACTIVE":
+        return {
+            "center": center,
+            "nodes": [],
+            "edges": [],
+            "image_scope_count": 0,
+            "article_scope_count": 0,
+        }
+
+    own_scope_rows = session.exec(
+        select(ArticleImage.id, Article.id)
+        .join(DetectedFace, DetectedFace.article_image_id == ArticleImage.id)
+        .join(FaceMatch, FaceMatch.detected_face_id == DetectedFace.id)
+        .join(Article, Article.id == ArticleImage.article_id)
+        .where(FaceMatch.person_id == person.id)
+        .where(FaceMatch.status.in_(PUBLIC_MATCH_STATUSES))
+    ).all()
+    own_image_ids = {row[0] for row in own_scope_rows}
+    own_article_ids = {row[1] for row in own_scope_rows}
+
+    if not own_image_ids and not own_article_ids:
+        return {
+            "center": center,
+            "nodes": [],
+            "edges": [],
+            "image_scope_count": 0,
+            "article_scope_count": 0,
+        }
+
+    def empty_entry(other_id: UUID, slug: str, name: str, display_name: str) -> dict:
+        return {
+            "id": str(other_id),
+            "slug": slug,
+            "name": name,
+            "display_name": display_name,
+            "image_ids": set(),
+            "article_ids": set(),
+            "last_article_id": None,
+            "last_article_title": None,
+            "last_seen": None,
+        }
+
+    by_person: dict[UUID, dict] = {}
+    seen_image_pairs: set[tuple[UUID, UUID]] = set()
+    seen_article_pairs: set[tuple[UUID, UUID]] = set()
+
+    if own_image_ids:
+        image_rows = session.exec(
+            select(
+                FaceMatch.person_id,
+                Person.slug,
+                Person.name,
+                Person.display_name,
+                ArticleImage.id,
+                Article.id,
+                Article.title,
+                Article.captured_at,
+            )
+            .join(Person, Person.id == FaceMatch.person_id)
+            .join(DetectedFace, DetectedFace.id == FaceMatch.detected_face_id)
+            .join(ArticleImage, ArticleImage.id == DetectedFace.article_image_id)
+            .join(Article, Article.id == ArticleImage.article_id)
+            .where(DetectedFace.article_image_id.in_(own_image_ids))
+            .where(FaceMatch.person_id != person.id)
+            .where(FaceMatch.status.in_(PUBLIC_MATCH_STATUSES))
+            .where(Person.is_public_figure == True)  # noqa: E712
+            .where(Person.status == "ACTIVE")
+        ).all()
+        for row in image_rows:
+            other_id, other_slug, other_name, other_display_name, image_id, article_id, article_title, captured_at = row
+            pair = (other_id, image_id)
+            if pair in seen_image_pairs:
+                continue
+            seen_image_pairs.add(pair)
+            entry = by_person.setdefault(other_id, empty_entry(other_id, other_slug, other_name, other_display_name))
+            entry["image_ids"].add(image_id)
+            entry["article_ids"].add(article_id)
+            if entry["last_seen"] is None or (captured_at and captured_at > entry["last_seen"]):
+                entry["last_seen"] = captured_at
+                entry["last_article_id"] = str(article_id)
+                entry["last_article_title"] = article_title
+
+    if own_article_ids:
+        article_rows = session.exec(
+            select(
+                FaceMatch.person_id,
+                Person.slug,
+                Person.name,
+                Person.display_name,
+                ArticleImage.id,
+                Article.id,
+                Article.title,
+                Article.captured_at,
+            )
+            .join(Person, Person.id == FaceMatch.person_id)
+            .join(DetectedFace, DetectedFace.id == FaceMatch.detected_face_id)
+            .join(ArticleImage, ArticleImage.id == DetectedFace.article_image_id)
+            .join(Article, Article.id == ArticleImage.article_id)
+            .where(ArticleImage.article_id.in_(own_article_ids))
+            .where(FaceMatch.person_id != person.id)
+            .where(FaceMatch.status.in_(PUBLIC_MATCH_STATUSES))
+            .where(Person.is_public_figure == True)  # noqa: E712
+            .where(Person.status == "ACTIVE")
+        ).all()
+        for row in article_rows:
+            other_id, other_slug, other_name, other_display_name, _image_id, article_id, article_title, captured_at = row
+            pair = (other_id, article_id)
+            if pair in seen_article_pairs:
+                continue
+            seen_article_pairs.add(pair)
+            entry = by_person.setdefault(other_id, empty_entry(other_id, other_slug, other_name, other_display_name))
+            entry["article_ids"].add(article_id)
+            if entry["last_seen"] is None or (captured_at and captured_at > entry["last_seen"]):
+                entry["last_seen"] = captured_at
+                entry["last_article_id"] = str(article_id)
+                entry["last_article_title"] = article_title
+
+    nodes = []
+    for entry in by_person.values():
+        image_count = len(entry["image_ids"])
+        article_count = len(entry["article_ids"])
+        weight = image_count * 2 + article_count
+        nodes.append(
+            {
+                "id": entry["id"],
+                "slug": entry["slug"],
+                "name": entry["name"],
+                "display_name": entry["display_name"],
+                "image_count": image_count,
+                "article_count": article_count,
+                "total_count": image_count + article_count,
+                "weight": weight,
+                "last_article_id": entry["last_article_id"],
+                "last_article_title": entry["last_article_title"],
+            }
+        )
+
+    nodes.sort(key=lambda item: (item["weight"], item["article_count"], item["image_count"], item["name"]), reverse=True)
+    nodes = nodes[: max(1, min(limit, 80))]
+    edges = [
+        {
+            "source": person.slug,
+            "target": node["slug"],
+            "image_count": node["image_count"],
+            "article_count": node["article_count"],
+            "total_count": node["total_count"],
+            "weight": node["weight"],
+            "last_article_id": node["last_article_id"],
+            "last_article_title": node["last_article_title"],
+        }
+        for node in nodes
+    ]
+
+    return {
+        "center": center,
+        "nodes": nodes,
+        "edges": edges,
+        "image_scope_count": len(own_image_ids),
+        "article_scope_count": len(own_article_ids),
+    }
 
 
 @router.post("/people/{slug}/contest")

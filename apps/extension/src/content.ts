@@ -1,6 +1,4 @@
 // @ts-nocheck
-import * as faceapi from 'face-api.js';
-
 const ALLOWLIST_FALLBACK = [
   'g1.globo.com',
   'oglobo.globo.com',
@@ -16,6 +14,9 @@ const ALLOWLIST_FALLBACK = [
 
 const WEB_BASE = 'http://localhost:3000';
 const SIDEBAR_ID = 'qtnf-sidebar-root';
+const MIN_ARTICLE_IMAGE_WIDTH = 360;
+const MIN_ARTICLE_IMAGE_HEIGHT = 220;
+const MIN_ARTICLE_IMAGE_AREA = 120_000;
 
 type CandidateImage = {
   node: HTMLImageElement;
@@ -52,8 +53,10 @@ const state = {
   analyzing: false,
   queuedScan: false,
   sidebarOpen: true,
+  showAllFaceImages: false,
   sidebarRoot: null as ShadowRoot | null,
   sidebarImages: [] as SidebarImage[],
+  detectorDiagnostics: [] as string[],
   analysis: {
     images: 0,
     faces: 0,
@@ -61,9 +64,22 @@ const state = {
   },
 };
 
-let faceModelLoad: Promise<void> | null = null;
 let scanTimer: number | undefined;
 let autocompleteTimer: number | undefined;
+let detectorWarmRequested = false;
+
+function detectorDebugEnabled() {
+  const params = new URLSearchParams(window.location.search);
+  return params.has('codex-faceapi') || params.has('diga_probe');
+}
+
+function recordDetectorDiagnostic(message: string) {
+  state.detectorDiagnostics = [message, ...state.detectorDiagnostics].slice(0, 5);
+  if (detectorDebugEnabled()) {
+    console.warn(`[diga-me detector] ${message}`);
+    renderSidebar();
+  }
+}
 
 function normalizeHost(hostname: string) {
   return hostname.replace(/^www\./, '').toLowerCase();
@@ -73,68 +89,33 @@ function isAllowedDomain(hostname: string) {
   return state.allowlist.has(normalizeHost(hostname));
 }
 
-function loadFaceDetector() {
-  if (!faceModelLoad) {
-    faceModelLoad = Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(chrome.runtime.getURL('models')),
-      faceapi.nets.faceLandmark68TinyNet.loadFromUri(chrome.runtime.getURL('models')),
-      faceapi.nets.faceRecognitionNet.loadFromUri(chrome.runtime.getURL('models')),
-    ]).then(() => undefined);
-  }
-  return faceModelLoad;
+function detectFacesForCandidate(candidate: CandidateImage): Promise<DetectedFacePayload[] | undefined> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'DETECT_FACES', imageUrl: candidate.image_url }, (response) => {
+      if (!response?.ok || !Array.isArray(response.payload?.faces)) {
+        recordDetectorDiagnostic(response?.error || `offscreen sem resposta para ${candidate.image_url}`);
+        resolve(undefined);
+        return;
+      }
+      recordDetectorDiagnostic(`offscreen ok: ${response.payload.faces.length} face(s) em ${candidate.width}x${candidate.height}`);
+      resolve(response.payload.faces);
+    });
+  });
 }
 
-function bboxFromDetection(detection: any, image: HTMLImageElement): DetectedFacePayload | null {
-  const source = detection?.detection || detection;
-  const box = source?.box;
-  if (!box) {
-    return null;
+function warmFaceDetector() {
+  if (detectorWarmRequested) {
+    return;
   }
-
-  const naturalWidth = image.naturalWidth || image.width;
-  const naturalHeight = image.naturalHeight || image.height;
-  const sourceWidth = source.imageWidth || naturalWidth;
-  const sourceHeight = source.imageHeight || naturalHeight;
-  const scaleX = naturalWidth / (sourceWidth || naturalWidth || 1);
-  const scaleY = naturalHeight / (sourceHeight || naturalHeight || 1);
-  const x = Math.max(0, Number(box.x) * scaleX);
-  const y = Math.max(0, Number(box.y) * scaleY);
-  const w = Math.max(0, Number(box.width) * scaleX);
-  const h = Math.max(0, Number(box.height) * scaleY);
-
-  if (![x, y, w, h].every(Number.isFinite) || w < 24 || h < 24) {
-    return null;
-  }
-
-  return {
-    x,
-    y,
-    w: Math.min(w, naturalWidth - x),
-    h: Math.min(h, naturalHeight - y),
-    score: typeof source.score === 'number' ? source.score : undefined,
-    ...(detection?.descriptor?.length === 128
-      ? { embedding: Array.from(detection.descriptor).map(Number), embedding_model: 'face-api.js/faceRecognitionNet' }
-      : {}),
-  };
-}
-
-async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFacePayload[] | undefined> {
-  try {
-    await loadFaceDetector();
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
-    let detections;
-    try {
-      detections = await faceapi.detectAllFaces(image, options).withFaceLandmarks(true).withFaceDescriptors();
-    } catch (_descriptorError: unknown) {
-      detections = await faceapi.detectAllFaces(image, options);
+  detectorWarmRequested = true;
+  chrome.runtime.sendMessage({ type: 'WARM_FACE_DETECTOR' }, (response) => {
+    if (!response?.ok) {
+      detectorWarmRequested = false;
+      recordDetectorDiagnostic(response?.error || 'offscreen não aqueceu o detector');
+      return;
     }
-
-    return detections
-      .map((detection: any) => bboxFromDetection(detection, image))
-      .filter(Boolean) as DetectedFacePayload[];
-  } catch (_error: unknown) {
-    return undefined;
-  }
+    recordDetectorDiagnostic('offscreen pronto');
+  });
 }
 
 function escapeHtml(value: unknown) {
@@ -154,8 +135,22 @@ function srcFromImage(img: HTMLImageElement) {
   return img.currentSrc || img.getAttribute('src') || img.src || '';
 }
 
+function absoluteImageUrl(value: string) {
+  return String(new URL(value, location.href));
+}
+
 function reportToPopup() {
   chrome.runtime.sendMessage({ type: 'REPORT_ANALYSIS_STATS', payload: state.analysis });
+}
+
+function normalizedPageUrl() {
+  const url = new URL(window.location.href);
+  url.hash = '';
+  return url.toString();
+}
+
+function isSmallArticleImage(width: number, height: number) {
+  return width < MIN_ARTICLE_IMAGE_WIDTH || height < MIN_ARTICLE_IMAGE_HEIGHT || width * height < MIN_ARTICLE_IMAGE_AREA;
 }
 
 function parseImages(): CandidateImage[] {
@@ -166,7 +161,10 @@ function parseImages(): CandidateImage[] {
 
     const rawSrc = srcFromImage(el);
     const alt = (el.getAttribute('alt') || '').toLowerCase();
-    if (el.naturalWidth <= 160 || el.naturalHeight <= 160) {
+    if (isSmallArticleImage(el.naturalWidth, el.naturalHeight)) {
+      if (rawSrc) {
+        state.processedImages.add(absoluteImageUrl(rawSrc));
+      }
       return false;
     }
     if (!rawSrc || rawSrc.startsWith('data:') || rawSrc.includes('svg')) {
@@ -184,7 +182,7 @@ function parseImages(): CandidateImage[] {
   const seen = new Set<string>();
   return nodes
     .map((img) => {
-      const image_url = String(new URL(srcFromImage(img), location.href));
+      const image_url = absoluteImageUrl(srcFromImage(img));
       return { node: img, image_url, width: Math.round(img.naturalWidth), height: Math.round(img.naturalHeight) };
     })
     .filter((item) => {
@@ -204,6 +202,62 @@ function upsertSidebarImage(next: SidebarImage) {
     state.sidebarImages.unshift(next);
   }
   renderSidebar();
+}
+
+function removeSidebarImage(imageUrl: string) {
+  const nextImages = state.sidebarImages.filter((item) => item.image_url !== imageUrl);
+  if (nextImages.length !== state.sidebarImages.length) {
+    state.sidebarImages = nextImages;
+    renderSidebar();
+  }
+}
+
+function imageHasFace(item: SidebarImage) {
+  return item.faces.length > 0;
+}
+
+function imageHasMatch(item: SidebarImage) {
+  return item.faces.some((face) => (face.matches || []).length > 0);
+}
+
+function visibleSidebarImages() {
+  return state.sidebarImages.filter(
+    (item) => item.status === 'analyzing' || (imageHasFace(item) && (state.showAllFaceImages || imageHasMatch(item))),
+  );
+}
+
+function faceBBox(face: any) {
+  return face?.bbox || { x: face?.x || 0, y: face?.y || 0, w: face?.w || 0, h: face?.h || 0 };
+}
+
+function faceCropImageStyle(item: SidebarImage, face: any) {
+  const bbox = faceBBox(face);
+  const width = Math.max(1, Number(item.width || 1));
+  const height = Math.max(1, Number(item.height || 1));
+  const padX = Math.max(18, Number(bbox.w || 0) * 0.55);
+  const padY = Math.max(18, Number(bbox.h || 0) * 0.65);
+  const rawX = Math.max(0, Number(bbox.x || 0) - padX);
+  const rawY = Math.max(0, Number(bbox.y || 0) - padY);
+  const rawW = Math.min(width - rawX, Number(bbox.w || 0) + padX * 2);
+  const rawH = Math.min(height - rawY, Number(bbox.h || 0) + padY * 2);
+  const square = Math.max(rawW, rawH, 80);
+  const cropW = Math.min(width, square);
+  const cropH = Math.min(height, square);
+  const cropX = Math.max(0, Math.min(width - cropW, rawX - (cropW - rawW) / 2));
+  const cropY = Math.max(0, Math.min(height - cropH, rawY - (cropH - rawH) / 2));
+  const frame = 72;
+  const scale = frame / cropW;
+  const renderedWidth = width * scale;
+  const renderedHeight = height * scale;
+  const renderedLeft = -cropX * scale;
+  const renderedTop = -cropY * scale;
+
+  return [
+    `height: ${renderedHeight.toFixed(2)}px`,
+    `left: ${renderedLeft.toFixed(2)}px`,
+    `top: ${renderedTop.toFixed(2)}px`,
+    `width: ${renderedWidth.toFixed(2)}px`,
+  ].join('; ');
 }
 
 function statusText(item: SidebarImage) {
@@ -235,6 +289,9 @@ function confidenceLabel(face: any) {
 
 function suggestionForm(face: any) {
   const faceId = escapeHtml(face.face_id || '');
+  if (!face.face_id) {
+    return '';
+  }
   const datalistId = `qtnf-people-${faceId}`;
   return `<form class="suggestion-form" data-qtnf-suggestion-form="true" data-face-id="${faceId}">
     <label>
@@ -242,26 +299,16 @@ function suggestionForm(face: any) {
       <input name="suggested_name" data-qtnf-person-input="${faceId}" list="${datalistId}" autocomplete="off" required />
       <datalist id="${datalistId}"></datalist>
     </label>
-    <label>
-      Fonte pública
-      <input name="source_url" type="url" placeholder="https://..." />
-    </label>
-    <label>
-      Comentário
-      <textarea name="comment" rows="2"></textarea>
-    </label>
-    <label>
-      Seu e-mail
-      <input name="submitter_email" type="email" />
-    </label>
-    <button type="submit">Enviar sugestão</button>
-    <a href="${WEB_BASE}/admin?new_person=1" target="_blank" rel="noreferrer">Criar novo registro no admin</a>
+    <div class="suggestion-actions">
+      <button type="submit">Sugerir</button>
+      <a href="${WEB_BASE}/admin?new_person=1" target="_blank" rel="noreferrer">Criar no admin</a>
+    </div>
     <div class="form-feedback" data-qtnf-suggestion-feedback></div>
   </form>`;
 }
 
 function renderFaces(item: SidebarImage) {
-  if (item.status !== 'ready') {
+  if (item.status !== 'ready' && !item.faces.length) {
     return '';
   }
   if (!item.faces.length) {
@@ -272,10 +319,18 @@ function renderFaces(item: SidebarImage) {
     ${item.faces
       .map((face, index) => {
         const matches = face.matches || [];
+        const faceId = escapeHtml(face.face_id || `${item.image_url}-${index}`);
         return `<details class="face-card" ${index === 0 ? 'open' : ''}>
           <summary>
-            <span>${escapeHtml(faceName(face, index))}</span>
-            <small>${escapeHtml(confidenceLabel(face))}</small>
+            <button class="face-jump" type="button" data-action="scroll-image" data-image-url="${escapeHtml(item.image_url)}" data-face-id="${faceId}">
+              <span class="face-thumb">
+                <img class="face-thumb-img" src="${escapeHtml(item.image_url)}" alt="" loading="lazy" style="${faceCropImageStyle(item, face)}" />
+              </span>
+              <span class="face-label">
+                <strong>${escapeHtml(faceName(face, index))}</strong>
+                <small>${escapeHtml(confidenceLabel(face))}</small>
+              </span>
+            </button>
           </summary>
           ${
             matches.length
@@ -298,8 +353,12 @@ function renderFaces(item: SidebarImage) {
 }
 
 function sidebarMarkup() {
-  const totalFaces = state.sidebarImages.reduce((total, item) => total + item.faces.length, 0);
-  const totalMatches = state.sidebarImages.reduce(
+  const pendingImages = state.sidebarImages.filter((item) => item.status === 'analyzing');
+  const faceImages = state.sidebarImages.filter(imageHasFace);
+  const recognizedImages = faceImages.filter(imageHasMatch);
+  const displayedImages = visibleSidebarImages();
+  const totalFaces = displayedImages.reduce((total, item) => total + item.faces.length, 0);
+  const totalMatches = displayedImages.reduce(
     (total, item) => total + item.faces.reduce((count, face) => count + (face.matches?.length || 0), 0),
     0,
   );
@@ -361,7 +420,9 @@ function sidebarMarkup() {
     .brand-row,
     .stats,
     .card-head,
-    summary,
+    .filter-row,
+    .suggestion-actions,
+    .face-jump,
     .match-row {
       align-items: center;
       display: flex;
@@ -405,6 +466,29 @@ function sidebarMarkup() {
       color: #191919;
       font-size: 12px;
       padding: 9px 14px;
+    }
+    .filter-row {
+      background: #fff4dd;
+      border-bottom: 1px solid #191919;
+      color: #191919;
+      font: 700 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      padding: 9px 14px;
+    }
+    .filter-row button {
+      background: #f7f2e8;
+      border: 1px solid #191919;
+      color: #191919;
+      min-height: 30px;
+      padding: 4px 8px;
+    }
+    .detector-debug {
+      background: #191919;
+      border-bottom: 1px solid #191919;
+      color: #f7f2e8;
+      font: 700 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      line-height: 1.35;
+      padding: 8px 14px;
+      word-break: break-word;
     }
     .list {
       background: #f7f2e8;
@@ -458,13 +542,45 @@ function sidebarMarkup() {
       background: #fff4dd;
     }
     summary {
-      cursor: pointer;
-      font-weight: 800;
       list-style: none;
-      padding: 8px;
     }
     summary::-webkit-details-marker {
       display: none;
+    }
+    .face-jump {
+      background: transparent;
+      border: 0;
+      color: #191919;
+      cursor: pointer;
+      justify-content: flex-start;
+      padding: 8px;
+      text-align: left;
+      width: 100%;
+    }
+    .face-thumb {
+      background-color: #eadcc7;
+      border: 1px solid rgba(25, 25, 25, 0.24);
+      display: block;
+      flex: 0 0 72px;
+      height: 72px;
+      overflow: hidden;
+      position: relative;
+      width: 72px;
+    }
+    .face-thumb-img {
+      display: block;
+      max-width: none;
+      object-fit: fill;
+      position: absolute;
+    }
+    .face-label {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .face-label strong {
+      font-size: 14px;
+      line-height: 1.15;
     }
     .match-list,
     .suggestion-form {
@@ -494,11 +610,15 @@ function sidebarMarkup() {
       padding: 6px;
       width: 100%;
     }
+    .suggestion-actions {
+      justify-content: flex-start;
+    }
     .suggestion-form button {
       background: #191919;
       border: 1px solid #191919;
       color: #f7f2e8;
       min-height: 34px;
+      padding: 0 10px;
     }
     .empty-state {
       border: 1px dashed rgba(25, 25, 25, 0.35);
@@ -519,21 +639,31 @@ function sidebarMarkup() {
       <p class="lede">Imagens da matéria entram aqui conforme carregam na página.</p>
     </header>
     <div class="stats">
-      <span>${state.sidebarImages.length} imagem(ns)</span>
+      <span>${displayedImages.length} imagem(ns)</span>
       <span>${totalFaces} face(s)</span>
       <span>${totalMatches} match(es)</span>
     </div>
+    <div class="filter-row">
+      <span>${recognizedImages.length} reconhecida(s) · ${faceImages.length} com faces${pendingImages.length ? ` · ${pendingImages.length} analisando` : ''}</span>
+      <button type="button" data-action="toggle-all-face-images">
+        ${state.showAllFaceImages ? 'Mostrar só reconhecidas' : 'Mostrar todas as imagens com faces'}
+      </button>
+    </div>
+    ${
+      detectorDebugEnabled()
+        ? `<div class="detector-debug">detector: ${escapeHtml(state.detectorDiagnostics[0] || 'aguardando offscreen')}</div>`
+        : ''
+    }
     <section class="list">
       ${
-        state.sidebarImages.length
-          ? state.sidebarImages
+        displayedImages.length
+          ? displayedImages
               .map(
                 (item) => `<article class="image-card">
                   <div class="card-head">
                     <strong>${escapeHtml(statusText(item))}</strong>
                     <span class="status">${escapeHtml(item.status)}</span>
                   </div>
-                  <img class="thumb" src="${escapeHtml(item.image_url)}" alt="" loading="lazy" />
                   <div class="dims">${item.width} × ${item.height}</div>
                   ${item.warning ? `<p class="empty">${escapeHtml(item.warning)}</p>` : ''}
                   ${renderFaces(item)}
@@ -544,7 +674,13 @@ function sidebarMarkup() {
                 </article>`,
               )
               .join('')
-          : '<div class="empty-state">Aguardando imagens grandes da pagina autorizada.</div>'
+          : `<div class="empty-state">${
+              faceImages.length
+                ? 'Existem imagens com faces sem identificação. Use "Mostrar todas as imagens com faces" para revisá-las.'
+                : state.analyzing || pendingImages.length
+                  ? 'Analisando imagens grandes da página autorizada.'
+                  : 'Aguardando imagens grandes com faces detectadas nesta página autorizada.'
+            }</div>`
       }
     </section>
   </aside>`;
@@ -583,6 +719,24 @@ function bindSidebarEvents(root: ShadowRoot) {
     });
   });
 
+  root.querySelectorAll('[data-action="toggle-all-face-images"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.showAllFaceImages = !state.showAllFaceImages;
+      renderSidebar();
+    });
+  });
+
+  root.querySelectorAll('[data-action="scroll-image"]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const imageUrl = (button as HTMLElement).dataset.imageUrl || '';
+      if (imageUrl) {
+        scrollToOriginalImage(imageUrl);
+      }
+    });
+  });
+
   root.querySelectorAll('[data-qtnf-suggestion-form="true"]').forEach((form) => {
     bindSuggestionForm(form as HTMLFormElement);
   });
@@ -592,6 +746,30 @@ function renderSidebar() {
   const root = ensureSidebar();
   root.innerHTML = sidebarMarkup();
   bindSidebarEvents(root);
+}
+
+function scrollToOriginalImage(imageUrl: string) {
+  const target = Array.from(document.querySelectorAll('img')).find((img) => {
+    if (!(img instanceof HTMLImageElement)) {
+      return false;
+    }
+    const rawSrc = srcFromImage(img);
+    return rawSrc && absoluteImageUrl(rawSrc) === imageUrl;
+  }) as HTMLImageElement | undefined;
+
+  if (!target) {
+    return;
+  }
+
+  target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+  const previousOutline = target.style.outline;
+  const previousOutlineOffset = target.style.outlineOffset;
+  target.style.outline = '4px solid #ffcc33';
+  target.style.outlineOffset = '4px';
+  window.setTimeout(() => {
+    target.style.outline = previousOutline;
+    target.style.outlineOffset = previousOutlineOffset;
+  }, 2400);
 }
 
 function bindSuggestionForm(form: HTMLFormElement) {
@@ -631,9 +809,9 @@ function bindSuggestionForm(form: HTMLFormElement) {
     const payload = {
       suggested_name: name,
       suggested_person_id: selectedOption?.dataset.personId || null,
-      source_url: String(data.get('source_url') || '').trim() || null,
-      comment: String(data.get('comment') || '').trim() || null,
-      submitter_email: String(data.get('submitter_email') || '').trim() || null,
+      source_url: normalizedPageUrl(),
+      comment: 'Sugestão criada pela sidebar da matéria.',
+      submitter_email: null,
     };
 
     if (!payload.suggested_name) {
@@ -656,7 +834,7 @@ function bindSuggestionForm(form: HTMLFormElement) {
         form.reset();
       }
     });
-  }, { once: true });
+  });
 }
 
 function updateStats() {
@@ -669,73 +847,99 @@ function updateStats() {
   reportToPopup();
 }
 
+function analyzePage(payload: any): Promise<any> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'ANALYZE_PAGE', payload }, (response) => {
+      resolve(response);
+    });
+  });
+}
+
 async function analyzeCandidates(candidates: CandidateImage[]) {
   const candidatesWithFaces = await Promise.all(
     candidates.map(async (candidate) => ({
       ...candidate,
-      faces: await detectFacesForImage(candidate.node),
+      faces: await detectFacesForCandidate(candidate),
     })),
   );
-  const candidateByUrl = new Map(candidatesWithFaces.map((candidate) => [candidate.image_url, candidate]));
+
+  const eligibleCandidates = candidatesWithFaces.filter(
+    (candidate) => Array.isArray(candidate.faces) && candidate.faces.length > 0,
+  );
+
+  candidatesWithFaces.forEach((candidate) => {
+    if (Array.isArray(candidate.faces) && candidate.faces.length > 0) {
+      upsertSidebarImage({
+        image_url: candidate.image_url,
+        width: candidate.width,
+        height: candidate.height,
+        status: 'analyzing',
+        faces: [],
+        warning: `${candidate.faces.length} face(s) detectada(s). Enviando para identificação...`,
+      });
+      return;
+    }
+    removeSidebarImage(candidate.image_url);
+  });
+
+  if (eligibleCandidates.length === 0) {
+    recordDetectorDiagnostic('offscreen não encontrou faces elegíveis nas imagens novas');
+    updateStats();
+    return;
+  }
+
+  const candidateByUrl = new Map(eligibleCandidates.map((candidate) => [candidate.image_url, candidate]));
   const payload = {
-    page_url: window.location.href,
+    page_url: normalizedPageUrl(),
     title: document.title,
-    images: candidatesWithFaces.map(({ image_url, width, height, faces }) => ({
+    images: eligibleCandidates.map(({ image_url, width, height, faces }) => ({
       image_url,
       width,
       height,
-      ...(faces !== undefined ? { faces } : {}),
+      faces,
     })),
   };
 
-  chrome.runtime.sendMessage({ type: 'ANALYZE_PAGE', payload }, (response) => {
-    if (!response?.ok) {
-      candidatesWithFaces.forEach((candidate) => {
-        upsertSidebarImage({
-          image_url: candidate.image_url,
-          width: candidate.width,
-          height: candidate.height,
-          status: 'error',
-          faces: [],
-          warning: 'Nao foi possivel analisar esta imagem agora.',
-        });
-      });
-      updateStats();
+  const response = await analyzePage(payload);
+  if (!response?.ok) {
+    recordDetectorDiagnostic(response?.error || 'backend não analisou as faces detectadas');
+    eligibleCandidates.forEach((candidate) => {
+      removeSidebarImage(candidate.image_url);
+    });
+    updateStats();
+    return;
+  }
+
+  const result = response.payload;
+  const returnedUrls = new Set<string>();
+  result.results?.forEach((entry: any) => {
+    const candidate = candidateByUrl.get(entry.image_url);
+    if (!candidate) {
       return;
     }
-
-    const result = response.payload;
-    const returnedUrls = new Set<string>();
-    result.results?.forEach((entry: any) => {
-      const candidate = candidateByUrl.get(entry.image_url);
-      if (!candidate) {
-        return;
-      }
-      returnedUrls.add(entry.image_url);
+    returnedUrls.add(entry.image_url);
+    if (Array.isArray(entry.faces) && entry.faces.length > 0) {
       upsertSidebarImage({
         image_url: candidate.image_url,
         width: candidate.width,
         height: candidate.height,
         status: 'ready',
         articleId: result.article_id || '',
-        faces: Array.isArray(entry.faces) ? entry.faces : [],
+        faces: entry.faces,
       });
-    });
-
-    candidatesWithFaces.forEach((candidate) => {
-      if (!returnedUrls.has(candidate.image_url)) {
-        upsertSidebarImage({
-          image_url: candidate.image_url,
-          width: candidate.width,
-          height: candidate.height,
-          status: 'ready',
-          articleId: result.article_id || '',
-          faces: [],
-        });
-      }
-    });
-    updateStats();
+      return;
+    }
+    removeSidebarImage(candidate.image_url);
+    recordDetectorDiagnostic(`backend devolveu 0 face(s) para ${candidate.width}x${candidate.height}`);
   });
+
+  eligibleCandidates.forEach((candidate) => {
+    if (!returnedUrls.has(candidate.image_url)) {
+      removeSidebarImage(candidate.image_url);
+      recordDetectorDiagnostic(`backend não retornou imagem detectada ${candidate.width}x${candidate.height}`);
+    }
+  });
+  updateStats();
 }
 
 async function scanForNewImages() {
@@ -747,6 +951,7 @@ async function scanForNewImages() {
   }
 
   ensureSidebar();
+  warmFaceDetector();
   if (state.analyzing) {
     state.queuedScan = true;
     return;
@@ -766,6 +971,7 @@ async function scanForNewImages() {
       height: candidate.height,
       status: 'analyzing',
       faces: [],
+      warning: 'Carregando detector e procurando faces...',
     });
   });
   updateStats();

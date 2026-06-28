@@ -63,13 +63,17 @@ function proxiedImageUrl(url: string) {
 }
 
 async function loadFaceModels() {
-  const faceapi = await import('face-api.js');
+  const [tf, faceapi] = await Promise.all([import('@tensorflow/tfjs'), import('face-api.js')]);
   if (!faceModelLoad) {
-    faceModelLoad = Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-      faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models'),
-      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
-    ]);
+    faceModelLoad = (async () => {
+      await tf.setBackend('cpu');
+      await tf.ready();
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+        faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models'),
+        faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+      ]);
+    })();
   }
   await faceModelLoad;
   return faceapi;

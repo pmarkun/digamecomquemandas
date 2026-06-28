@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
+    base: './',
     publicDir: false,
     build: {
       outDir: 'dist',
@@ -30,6 +31,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           background: resolve(__dirname, 'src/background.ts'),
+          offscreen: resolve(__dirname, 'offscreen.html'),
           popup: resolve(__dirname, 'src/popup/popup.ts'),
         },
         output: {

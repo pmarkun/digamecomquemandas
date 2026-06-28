@@ -142,6 +142,41 @@ class PersonOut(BaseModel):
     created_at: datetime
 
 
+class InfluenceGraphPerson(BaseModel):
+    id: str
+    slug: str
+    name: str
+    display_name: str
+
+
+class InfluenceGraphNode(InfluenceGraphPerson):
+    image_count: int = 0
+    article_count: int = 0
+    total_count: int = 0
+    weight: int = 0
+    last_article_id: str | None = None
+    last_article_title: str | None = None
+
+
+class InfluenceGraphEdge(BaseModel):
+    source: str
+    target: str
+    image_count: int = 0
+    article_count: int = 0
+    total_count: int = 0
+    weight: int = 0
+    last_article_id: str | None = None
+    last_article_title: str | None = None
+
+
+class InfluenceGraphOut(BaseModel):
+    center: InfluenceGraphPerson
+    nodes: list[InfluenceGraphNode]
+    edges: list[InfluenceGraphEdge]
+    image_scope_count: int = 0
+    article_scope_count: int = 0
+
+
 class ReferenceImageIn(BaseModel):
     source_url: str
     model_name: str = "buffalo_l"
@@ -176,6 +211,25 @@ class SuggestionCreate(BaseModel):
     source_url: str | None = None
     comment: str | None = None
     submitter_email: str | None = None
+
+
+class BootstrapRunCreate(BaseModel):
+    limit_per_source: int = Field(default=10, ge=1, le=50)
+    render_browser: bool = True
+
+
+class BootstrapRunArticleAttach(BaseModel):
+    article_id: UUID | None = None
+    status: str
+    image_count: int = 0
+    face_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class BootstrapLabelGroupIn(BaseModel):
+    face_ids: list[UUID]
+    person_id: UUID | None = None
+    name: str | None = None
 
 
 class LoginIn(BaseModel):

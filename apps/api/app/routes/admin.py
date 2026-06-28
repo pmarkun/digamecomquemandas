@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException
+from collections import defaultdict
+from hashlib import sha256
 import re
 import unicodedata
 from typing import Final
@@ -12,6 +14,8 @@ from ..models import (
     AllowedDomain,
     OptoutRequest,
     AuditLog,
+    BootstrapRun,
+    BootstrapRunArticle,
     FaceMatch,
     FaceSuggestion,
     Article,
@@ -21,10 +25,24 @@ from ..models import (
     DetectedFace,
     FaceEmbedding,
 )
-from ..schemas import AdminAddFacesIn, LoginIn, LoginOut, MatchReassignIn, MatchReviewIn, PersonCreate, PersonUpdate, ReferenceImageIn, ReferenceImageOut
+from ..schemas import (
+    AdminAddFacesIn,
+    BootstrapLabelGroupIn,
+    BootstrapRunArticleAttach,
+    BootstrapRunCreate,
+    LoginIn,
+    LoginOut,
+    MatchReassignIn,
+    MatchReviewIn,
+    PersonCreate,
+    PersonUpdate,
+    ReferenceImageIn,
+    ReferenceImageOut,
+)
 from ..services.audit import write_action
+from ..services.bootstrap_discovery import POLITICS_SOURCES, discover_politics_articles
 from ..services.image_fetcher import fetch_image
-from ..services.match import embedding_from_image, match_candidates, normalize_embedding
+from ..services.match import cosine, embedding_from_image, match_candidates, normalize_embedding
 from .extension import promote_face_reference, _upsert_manual_match
 
 router = APIRouter(prefix="/admin")
@@ -37,6 +55,8 @@ ALLOWED_SUGGESTION_STATUS: Final = {
     "NEEDS_MORE_INFO",
     "PENDING_REVIEW",
 }
+BOOTSTRAP_GROUP_THRESHOLD: Final = 0.88
+ACTIVE_MATCH_STATUS: Final = {"AUTO", "AUTO_APPROVED", "APPROVED", "APPROVED_MANUAL"}
 
 
 def _require_admin(
@@ -67,6 +87,159 @@ def login(payload: LoginIn):
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
+@router.post("/bootstrap-runs")
+def create_bootstrap_run(
+    payload: BootstrapRunCreate,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    run = BootstrapRun(
+        status="DISCOVERING",
+        limit_per_source=payload.limit_per_source,
+        render_browser=payload.render_browser,
+    )
+    session.add(run)
+    session.flush()
+
+    warnings: list[str] = []
+    discovered = discover_politics_articles(payload.limit_per_source, payload.render_browser)
+    for result in discovered:
+        warnings.extend(f"{result.source.source}: {warning}" for warning in result.warnings)
+        for article in result.articles:
+            session.add(
+                BootstrapRunArticle(
+                    run_id=run.id,
+                    source=article.source,
+                    domain=article.domain,
+                    section_url=article.section_url,
+                    article_url=article.article_url,
+                    title=article.title,
+                    status="DISCOVERED",
+                )
+            )
+
+    run.status = "READY"
+    run.warnings = warnings
+    run.updated_at = datetime.now(timezone.utc)
+    session.add(run)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="create_bootstrap_run",
+        entity_type="bootstrap_run",
+        entity_id=run.id,
+        metadata={"limit_per_source": payload.limit_per_source, "render_browser": payload.render_browser},
+    )
+    session.commit()
+    session.refresh(run)
+    return _bootstrap_run_payload(session, run)
+
+
+@router.get("/bootstrap-runs")
+def list_bootstrap_runs(session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+    runs = session.exec(select(BootstrapRun).order_by(BootstrapRun.created_at.desc())).all()
+    return [
+        {
+            "id": str(run.id),
+            "status": run.status,
+            "limit_per_source": run.limit_per_source,
+            "render_browser": run.render_browser,
+            "warnings": run.warnings,
+            "created_at": run.created_at,
+            "updated_at": run.updated_at,
+        }
+        for run in runs
+    ]
+
+
+@router.get("/bootstrap-runs/{run_id}")
+def get_bootstrap_run(run_id: str, session: Session = Depends(get_session), _: bool = Depends(_require_admin)):
+    run = session.get(BootstrapRun, _as_uuid(run_id))
+    if not run:
+        raise HTTPException(status_code=404, detail="Run de bootstrap não encontrado")
+    return _bootstrap_run_payload(session, run)
+
+
+@router.post("/bootstrap-runs/{run_id}/articles/{run_article_id}/attach")
+def attach_bootstrap_article(
+    run_id: str,
+    run_article_id: str,
+    payload: BootstrapRunArticleAttach,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    run = session.get(BootstrapRun, _as_uuid(run_id))
+    item = session.get(BootstrapRunArticle, _as_uuid(run_article_id))
+    if not run or not item or item.run_id != run.id:
+        raise HTTPException(status_code=404, detail="Item de bootstrap não encontrado")
+
+    item.article_id = payload.article_id
+    item.status = payload.status
+    item.image_count = payload.image_count
+    item.face_count = payload.face_count
+    item.warnings = payload.warnings
+    item.updated_at = datetime.now(timezone.utc)
+    run.updated_at = item.updated_at
+    session.add(item)
+    session.add(run)
+    session.commit()
+    return {"ok": True, "article": _bootstrap_article_payload(item)}
+
+
+@router.post("/bootstrap-runs/{run_id}/label-group")
+def label_bootstrap_group(
+    run_id: str,
+    payload: BootstrapLabelGroupIn,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    run = session.get(BootstrapRun, _as_uuid(run_id))
+    if not run:
+        raise HTTPException(status_code=404, detail="Run de bootstrap não encontrado")
+    if not payload.face_ids:
+        raise HTTPException(status_code=400, detail="Nenhuma face informada")
+
+    person = session.get(Person, payload.person_id) if payload.person_id else None
+    if not person:
+        name = (payload.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Informe pessoa existente ou nome novo")
+        person = Person(
+            name=name,
+            display_name=name,
+            slug=_unique_slug(session, name),
+            category="politica",
+            description="Criado pela bancada de bootstrap de políticos.",
+            public_office=None,
+            source_urls=[],
+            is_public_figure=True,
+        )
+        session.add(person)
+        session.flush()
+
+    updated = 0
+    for face_id in payload.face_ids:
+        face = session.get(DetectedFace, face_id)
+        if not face:
+            continue
+        _upsert_manual_match(session, face, person)
+        promote_face_reference(session, face, person)
+        updated += 1
+
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="label_bootstrap_group",
+        entity_type="bootstrap_run",
+        entity_id=run.id,
+        metadata={"person_id": str(person.id), "faces": updated},
+    )
+    session.commit()
+    return {"ok": True, "person_id": str(person.id), "updated_faces": updated}
+
+
 def _person_payload(item: Person) -> dict:
     return {
         "id": str(item.id),
@@ -88,6 +261,16 @@ def _slugify(value: str) -> str:
     ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^a-z0-9-]", "", re.sub(r"\s+", "-", ascii_value))
     return slug or "pessoa-sugerida"
+
+
+def _unique_slug(session: Session, value: str) -> str:
+    base_slug = _slugify(value)[:80]
+    final_slug = base_slug
+    suffix = 2
+    while session.exec(select(Person).where(Person.slug == final_slug)).first():
+        final_slug = f"{base_slug[:73]}-{suffix}"[:80]
+        suffix += 1
+    return final_slug
 
 
 def _article_context(session: Session, face_id: UUID | None) -> dict:
@@ -151,6 +334,132 @@ def _suggestion_payload(session: Session, item: FaceSuggestion) -> dict:
         "status": item.status,
         "created_at": item.created_at,
         **_article_context(session, item.detected_face_id),
+    }
+
+
+def _bootstrap_article_payload(item: BootstrapRunArticle) -> dict:
+    return {
+        "id": str(item.id),
+        "source": item.source,
+        "domain": item.domain,
+        "section_url": item.section_url,
+        "article_url": item.article_url,
+        "title": item.title,
+        "status": item.status,
+        "article_id": str(item.article_id) if item.article_id else None,
+        "image_count": item.image_count,
+        "face_count": item.face_count,
+        "warnings": item.warnings,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
+def _face_context_payload(session: Session, face: DetectedFace) -> dict | None:
+    embedding = normalize_embedding(face.embedding)
+    if not embedding:
+        return None
+    image = session.get(ArticleImage, face.article_image_id)
+    article = session.get(Article, image.article_id) if image else None
+    return {
+        "face_id": str(face.id),
+        "bbox": face.bbox,
+        "embedding": embedding,
+        "image_id": str(image.id) if image else None,
+        "image_url": image.image_url if image else None,
+        "image_width": image.width if image else None,
+        "image_height": image.height if image else None,
+        "article_id": str(article.id) if article else None,
+        "article_url": article.url if article else None,
+        "article_title": article.title if article else None,
+    }
+
+
+def _face_has_active_match(session: Session, face_id: UUID) -> bool:
+    return bool(
+        session.exec(
+            select(FaceMatch).where(
+                FaceMatch.detected_face_id == face_id,
+                FaceMatch.status.in_(ACTIVE_MATCH_STATUS),
+            )
+        ).first()
+    )
+
+
+def _bootstrap_groups(session: Session, run_id: UUID) -> list[dict]:
+    run_articles = session.exec(
+        select(BootstrapRunArticle).where(BootstrapRunArticle.run_id == run_id)
+    ).all()
+    article_ids = [item.article_id for item in run_articles if item.article_id]
+    if not article_ids:
+        return []
+
+    images = session.exec(select(ArticleImage).where(ArticleImage.article_id.in_(article_ids))).all()
+    image_ids = [image.id for image in images]
+    if not image_ids:
+        return []
+
+    candidates: list[dict] = []
+    for face in session.exec(select(DetectedFace).where(DetectedFace.article_image_id.in_(image_ids))).all():
+        if _face_has_active_match(session, face.id):
+            continue
+        payload = _face_context_payload(session, face)
+        if payload:
+            candidates.append(payload)
+
+    groups: list[dict] = []
+    for candidate in candidates:
+        placed = False
+        for group in groups:
+            representative = group["faces"][0]["embedding"]
+            if cosine(candidate["embedding"], representative) >= BOOTSTRAP_GROUP_THRESHOLD:
+                group["faces"].append(candidate)
+                placed = True
+                break
+        if not placed:
+            groups.append({"faces": [candidate]})
+
+    for group in groups:
+        face_ids = sorted(face["face_id"] for face in group["faces"])
+        group["group_id"] = sha256(",".join(face_ids).encode("utf-8")).hexdigest()[:16]
+        group["face_count"] = len(group["faces"])
+        group["article_count"] = len({face["article_id"] for face in group["faces"] if face["article_id"]})
+        for face in group["faces"]:
+            face.pop("embedding", None)
+
+    groups.sort(key=lambda item: (item["face_count"], item["article_count"]), reverse=True)
+    return groups
+
+
+def _bootstrap_run_payload(session: Session, run: BootstrapRun) -> dict:
+    articles = session.exec(
+        select(BootstrapRunArticle)
+        .where(BootstrapRunArticle.run_id == run.id)
+        .order_by(BootstrapRunArticle.source, BootstrapRunArticle.created_at)
+    ).all()
+    by_status: dict[str, int] = defaultdict(int)
+    for item in articles:
+        by_status[item.status] += 1
+    return {
+        "id": str(run.id),
+        "status": run.status,
+        "limit_per_source": run.limit_per_source,
+        "render_browser": run.render_browser,
+        "warnings": run.warnings,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+        "sources": [
+            {"source": item.source, "domain": item.domain, "url": item.url}
+            for item in POLITICS_SOURCES
+        ],
+        "counts": {
+            "articles": len(articles),
+            "images": sum(item.image_count for item in articles),
+            "faces": sum(item.face_count for item in articles),
+            "statuses": dict(by_status),
+        },
+        "articles": [_bootstrap_article_payload(item) for item in articles],
+        "groups": _bootstrap_groups(session, run.id),
     }
 
 
