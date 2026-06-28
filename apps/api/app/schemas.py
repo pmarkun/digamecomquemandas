@@ -232,6 +232,11 @@ class BootstrapLabelGroupIn(BaseModel):
     name: str | None = None
 
 
+class BootstrapAssignFaceIn(BaseModel):
+    person_id: UUID | None = None
+    name: str | None = None
+
+
 class LoginIn(BaseModel):
     email: str
     password: str

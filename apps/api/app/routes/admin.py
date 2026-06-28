@@ -27,6 +27,7 @@ from ..models import (
 )
 from ..schemas import (
     AdminAddFacesIn,
+    BootstrapAssignFaceIn,
     BootstrapLabelGroupIn,
     BootstrapRunArticleAttach,
     BootstrapRunCreate,
@@ -184,7 +185,7 @@ def attach_bootstrap_article(
     session.add(item)
     session.add(run)
     session.commit()
-    return {"ok": True, "article": _bootstrap_article_payload(item)}
+    return {"ok": True, "article": _bootstrap_article_payload(session, item)}
 
 
 @router.post("/bootstrap-runs/{run_id}/label-group")
@@ -238,6 +239,74 @@ def label_bootstrap_group(
     )
     session.commit()
     return {"ok": True, "person_id": str(person.id), "updated_faces": updated}
+
+
+@router.post("/bootstrap-runs/{run_id}/faces/{face_id}/assign")
+def assign_bootstrap_face(
+    run_id: str,
+    face_id: str,
+    payload: BootstrapAssignFaceIn,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    run = session.get(BootstrapRun, _as_uuid(run_id))
+    face = session.get(DetectedFace, _as_uuid(face_id))
+    if not run or not face:
+        raise HTTPException(status_code=404, detail="Run ou face não encontrado")
+
+    image = session.get(ArticleImage, face.article_image_id)
+    article = session.get(Article, image.article_id) if image else None
+    if not article:
+        raise HTTPException(status_code=400, detail="Face sem matéria vinculada")
+
+    linked = session.exec(
+        select(BootstrapRunArticle).where(
+            BootstrapRunArticle.run_id == run.id,
+            BootstrapRunArticle.article_id == article.id,
+        )
+    ).first()
+    if not linked:
+        raise HTTPException(status_code=404, detail="Face não pertence a este run")
+
+    person = session.get(Person, payload.person_id) if payload.person_id else None
+    if not person:
+        name = (payload.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Informe pessoa existente ou nome novo")
+        person = Person(
+            name=name,
+            display_name=name,
+            slug=_unique_slug(session, name),
+            category="politica",
+            description="Criado pela revisão de bootstrap de políticos.",
+            public_office=None,
+            source_urls=[article.url],
+            is_public_figure=True,
+        )
+        session.add(person)
+        session.flush()
+
+    now = datetime.now(timezone.utc)
+    existing_matches = session.exec(select(FaceMatch).where(FaceMatch.detected_face_id == face.id)).all()
+    for match in existing_matches:
+        if match.person_id != person.id and match.status not in {"REJECTED", "HIDDEN_OPTOUT"}:
+            match.status = "REJECTED"
+            match.reviewed_at = now
+            session.add(match)
+
+    _upsert_manual_match(session, face, person)
+    promote_face_reference(session, face, person)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="assign_bootstrap_face",
+        entity_type="detected_face",
+        entity_id=face.id,
+        metadata={"run_id": str(run.id), "person_id": str(person.id)},
+    )
+    session.commit()
+    return {"ok": True, "person_id": str(person.id), "face_id": str(face.id)}
 
 
 def _person_payload(item: Person) -> dict:
@@ -337,8 +406,84 @@ def _suggestion_payload(session: Session, item: FaceSuggestion) -> dict:
     }
 
 
-def _bootstrap_article_payload(item: BootstrapRunArticle) -> dict:
+def _bootstrap_match_payload(session: Session, match: FaceMatch) -> dict | None:
+    person = session.get(Person, match.person_id)
+    if not person:
+        return None
     return {
+        "id": str(match.id),
+        "person_id": str(person.id),
+        "person_name": person.display_name or person.name,
+        "person_slug": person.slug,
+        "score": match.score,
+        "status": match.status,
+    }
+
+
+def _bootstrap_suggestion_payload(session: Session, suggestion: FaceSuggestion) -> dict:
+    person = session.get(Person, suggestion.suggested_person_id) if suggestion.suggested_person_id else None
+    return {
+        "id": str(suggestion.id),
+        "suggested_name": suggestion.suggested_name,
+        "suggested_person_id": str(suggestion.suggested_person_id) if suggestion.suggested_person_id else None,
+        "suggested_person_name": person.display_name or person.name if person else None,
+        "status": suggestion.status,
+    }
+
+
+def _bootstrap_face_payload(session: Session, face: DetectedFace) -> dict:
+    settings = get_settings()
+    matches = []
+    for match in session.exec(
+        select(FaceMatch)
+        .where(FaceMatch.detected_face_id == face.id)
+        .where(FaceMatch.status != "HIDDEN_OPTOUT")
+        .order_by(FaceMatch.score.desc())
+    ).all():
+        if match.status == "REJECTED":
+            continue
+        if match.status in {"AUTO", "AUTO_APPROVED"} and match.score < settings.face_display_threshold:
+            continue
+        payload = _bootstrap_match_payload(session, match)
+        if payload:
+            matches.append(payload)
+
+    suggestions = [
+        _bootstrap_suggestion_payload(session, suggestion)
+        for suggestion in session.exec(
+            select(FaceSuggestion)
+            .where(FaceSuggestion.detected_face_id == face.id)
+            .where(FaceSuggestion.status == "PENDING_REVIEW")
+            .order_by(FaceSuggestion.created_at.desc())
+        ).all()
+    ]
+    return {
+        "face_id": str(face.id),
+        "bbox": face.bbox,
+        "quality_score": face.quality_score,
+        "matches": matches,
+        "suggestions": suggestions,
+    }
+
+
+def _bootstrap_image_payload(session: Session, image: ArticleImage) -> dict:
+    faces = session.exec(
+        select(DetectedFace)
+        .where(DetectedFace.article_image_id == image.id)
+        .order_by(DetectedFace.created_at)
+    ).all()
+    return {
+        "image_id": str(image.id),
+        "image_url": image.image_url,
+        "width": image.width,
+        "height": image.height,
+        "status": image.status,
+        "faces": [_bootstrap_face_payload(session, face) for face in faces],
+    }
+
+
+def _bootstrap_article_payload(session: Session, item: BootstrapRunArticle) -> dict:
+    payload = {
         "id": str(item.id),
         "source": item.source,
         "domain": item.domain,
@@ -353,6 +498,16 @@ def _bootstrap_article_payload(item: BootstrapRunArticle) -> dict:
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }
+    if item.article_id:
+        images = session.exec(
+            select(ArticleImage)
+            .where(ArticleImage.article_id == item.article_id)
+            .order_by(ArticleImage.created_at)
+        ).all()
+        payload["images"] = [_bootstrap_image_payload(session, image) for image in images]
+    else:
+        payload["images"] = []
+    return payload
 
 
 def _face_context_payload(session: Session, face: DetectedFace) -> dict | None:
@@ -466,7 +621,7 @@ def _bootstrap_run_payload(session: Session, run: BootstrapRun) -> dict:
             "faces": sum(item.face_count for item in articles),
             "statuses": dict(by_status),
         },
-        "articles": [_bootstrap_article_payload(item) for item in articles],
+        "articles": [_bootstrap_article_payload(session, item) for item in articles],
         "groups": _bootstrap_groups(session, run.id),
     }
 

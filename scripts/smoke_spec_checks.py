@@ -126,6 +126,8 @@ def check_frontend_contracts() -> None:
     ok('web.admin.bootstrap_page', 'Nomeação em lote' in bootstrap_page and 'processRun' in bootstrap_page, 'bancada de bootstrap existe')
     ok('web.admin.bootstrap_detects_client_side', 'detectFaces(' in bootstrap_page and 'face-api.js' in bootstrap_page and '/extension/analyze-page' in bootstrap_page, 'bootstrap detecta faces no browser e envia embeddings')
     ok('web.admin.bootstrap_group_label', '/label-group' in bootstrap_page and 'Nomear grupo' in bootstrap_page, 'bootstrap permite nomear grupo de faces')
+    ok('web.admin.bootstrap_article_deck', 'bootstrap-review-deck' in bootstrap_page and 'ArrowLeft' in bootstrap_page and 'ArrowRight' in bootstrap_page, 'bootstrap revisa uma matéria por vez com navegação')
+    ok('web.admin.bootstrap_face_actions', '/faces/${face.face_id}/assign' in bootstrap_page and 'reviewMatch(primaryMatch.id' in bootstrap_page, 'bootstrap permite aprovar, rejeitar e atribuir faces')
     profile_page = (ROOT / 'apps/web/app/pessoa/[slug]/page.tsx').read_text(encoding='utf-8')
     connections_page = (ROOT / 'apps/web/app/pessoa/[slug]/conexoes/page.tsx').read_text(encoding='utf-8')
     contest_page = (ROOT / 'apps/web/app/pessoa/[slug]/contestar/page.tsx').read_text(encoding='utf-8')
@@ -163,6 +165,7 @@ def check_frontend_contracts() -> None:
     ok('api.admin.bootstrap_match_threshold', 'max(settings.face_match_threshold, settings.face_display_threshold)' in match_service and 'best_by_person' in match_service, 'matching automático usa threshold visível e deduplica por pessoa')
     ok('api.admin.bootstrap_groups_ignore_low_auto', 'FaceMatch.score >= settings.face_display_threshold' in admin_routes and 'APPROVED_MANUAL' in admin_routes, 'agrupamento ignora AUTO abaixo do threshold visível')
     ok('api.admin.bootstrap_label_promotes', 'label_bootstrap_group' in admin_routes and 'promote_face_reference' in admin_routes and 'APPROVED_MANUAL' in admin_routes, 'nomear grupo aprova e promove referência')
+    ok('api.admin.bootstrap_assign_face', 'assign_bootstrap_face' in admin_routes and '/bootstrap-runs/{run_id}/faces/{face_id}/assign' in admin_routes, 'bootstrap tem endpoint para atribuir face individual')
 
 
 def check_extension_contracts() -> None:

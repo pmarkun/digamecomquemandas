@@ -1381,6 +1381,111 @@ button {
   overflow-wrap: anywhere;
 }
 
+.bootstrap-review-deck {
+  display: grid;
+  gap: 1rem;
+}
+
+.bootstrap-review-nav {
+  align-items: center;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: center;
+}
+
+.icon-button {
+  align-items: center;
+  aspect-ratio: 1;
+  background: #1f1f1f;
+  border: 1px solid #1f1f1f;
+  color: #fffaf0;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 1.2rem;
+  justify-content: center;
+  width: 2.4rem;
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.bootstrap-review-header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.bootstrap-review-header h2 {
+  font-size: 1.25rem;
+  line-height: 1.25;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.bootstrap-review-header a {
+  overflow-wrap: anywhere;
+}
+
+.bootstrap-warnings {
+  border: 1px dashed rgba(25, 25, 25, 0.28);
+  padding: 0.5rem;
+}
+
+.bootstrap-image-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.bootstrap-image-review {
+  border-top: 1px solid rgba(25, 25, 25, 0.18);
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: minmax(220px, 360px) minmax(0, 1fr);
+  padding-top: 1rem;
+}
+
+.bootstrap-image-preview {
+  background: #eadcc7;
+  display: block;
+}
+
+.bootstrap-image-preview img {
+  display: block;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+  width: 100%;
+}
+
+.bootstrap-face-review-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.bootstrap-face-review {
+  align-items: start;
+  background: #fffaf0;
+  border: 1px solid rgba(25, 25, 25, 0.22);
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0.65rem;
+}
+
+.bootstrap-face-body {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.button.compact,
+.button.secondary.compact {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.65rem;
+}
+
 .bootstrap-group {
   background: #fffaf0;
   border: 1px solid #2b2b2b;
@@ -1432,6 +1537,11 @@ button {
   }
 
   .bootstrap-article {
+    grid-template-columns: 1fr;
+  }
+
+  .bootstrap-image-review,
+  .bootstrap-face-review {
     grid-template-columns: 1fr;
   }
 

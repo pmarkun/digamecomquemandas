@@ -29,9 +29,35 @@ type RunArticle = {
   image_count: number;
   face_count: number;
   warnings: string[];
+  images: BootstrapImage[];
 };
 
 type BootstrapFace = {
+  face_id: string;
+  bbox: BBox;
+  quality_score?: number | null;
+  matches: BootstrapMatch[];
+  suggestions: BootstrapSuggestion[];
+};
+
+type BootstrapMatch = {
+  id: string;
+  person_id: string;
+  person_name: string;
+  person_slug: string;
+  score: number;
+  status: string;
+};
+
+type BootstrapSuggestion = {
+  id: string;
+  suggested_name: string;
+  suggested_person_id?: string | null;
+  suggested_person_name?: string | null;
+  status: string;
+};
+
+type BootstrapGroupFace = {
   face_id: string;
   bbox: BBox;
   image_id?: string | null;
@@ -42,11 +68,20 @@ type BootstrapFace = {
   article_title?: string | null;
 };
 
+type BootstrapImage = {
+  image_id: string;
+  image_url: string;
+  width?: number | null;
+  height?: number | null;
+  status: string;
+  faces: BootstrapFace[];
+};
+
 type BootstrapGroup = {
   group_id: string;
   face_count: number;
   article_count: number;
-  faces: BootstrapFace[];
+  faces: BootstrapGroupFace[];
 };
 
 type BootstrapRun = {
@@ -182,9 +217,9 @@ async function detectFaces(imageUrl: string): Promise<{ width: number; height: n
   };
 }
 
-function cropStyle(face: BootstrapFace): CSSProperties {
-  const width = Math.max(1, Number(face.image_width || 1));
-  const height = Math.max(1, Number(face.image_height || 1));
+function cropStyle(face: BootstrapFace, image: BootstrapImage): CSSProperties {
+  const width = Math.max(1, Number(image.width || 1));
+  const height = Math.max(1, Number(image.height || 1));
   const padX = Math.max(18, Number(face.bbox.w || 0) * 0.55);
   const padY = Math.max(18, Number(face.bbox.h || 0) * 0.65);
   const rawX = Math.max(0, Number(face.bbox.x || 0) - padX);
@@ -218,6 +253,7 @@ export default function BootstrapAdminPage() {
   const [feedback, setFeedback] = useState('');
   const [processing, setProcessing] = useState(false);
   const [activeArticleId, setActiveArticleId] = useState<string | null>(null);
+  const [activeArticleIndex, setActiveArticleIndex] = useState(0);
   const [groupNames, setGroupNames] = useState<Record<string, string>>({});
   const [peopleOptions, setPeopleOptions] = useState<Record<string, PersonOption[]>>({});
 
@@ -225,6 +261,30 @@ export default function BootstrapAdminPage() {
     () => run?.articles.filter((article) => ['DISCOVERED', 'ERROR'].includes(article.status)) || [],
     [run],
   );
+  const reviewArticles = useMemo(() => run?.articles || [], [run]);
+  const currentArticle = reviewArticles[activeArticleIndex] || null;
+
+  useEffect(() => {
+    if (activeArticleIndex >= reviewArticles.length) {
+      setActiveArticleIndex(Math.max(0, reviewArticles.length - 1));
+    }
+  }, [activeArticleIndex, reviewArticles.length]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (!reviewArticles.length) return;
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      if (event.key === 'ArrowLeft') {
+        setActiveArticleIndex((current) => Math.max(0, current - 1));
+      }
+      if (event.key === 'ArrowRight') {
+        setActiveArticleIndex((current) => Math.min(reviewArticles.length - 1, current + 1));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [reviewArticles.length]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem('digaMeAdminToken') || '';
@@ -356,6 +416,31 @@ export default function BootstrapAdminPage() {
     }, 180);
   };
 
+  const reviewMatch = async (matchId: string, status: 'APPROVED' | 'REJECTED') => {
+    if (!run) return;
+    await api.post(`/admin/matches/${matchId}/review`, { status }, headersFor(token));
+    setFeedback(status === 'APPROVED' ? 'Match aprovado.' : 'Match rejeitado.');
+    await loadRun(run.id);
+  };
+
+  const assignFace = async (face: BootstrapFace) => {
+    if (!run) return;
+    const value = (groupNames[face.face_id] || '').trim();
+    if (!value) return;
+    const selected = (peopleOptions[face.face_id] || []).find((person) => [person.name, person.display_name].includes(value));
+    await api.post(
+      `/admin/bootstrap-runs/${run.id}/faces/${face.face_id}/assign`,
+      {
+        person_id: selected?.id || null,
+        name: selected ? null : value,
+      },
+      headersFor(token),
+    );
+    setGroupNames((current) => ({ ...current, [face.face_id]: '' }));
+    setFeedback(`Face atribuída a ${value}.`);
+    await loadRun(run.id);
+  };
+
   const labelGroup = async (group: BootstrapGroup) => {
     if (!run) return;
     const name = (groupNames[group.group_id] || '').trim();
@@ -445,27 +530,116 @@ export default function BootstrapAdminPage() {
                       <h2>Coleta e análise</h2>
                       <p className="muted">Run {run.id.slice(0, 8)} · {remainingArticles.length} matérias pendentes.</p>
                     </div>
-                    <button className="button" type="button" disabled={processing || remainingArticles.length === 0} onClick={processRun}>
-                      {processing ? 'Processando...' : 'Processar pendentes'}
-                    </button>
+                    <div className="toolbar">
+                      {currentArticle && (
+                        <button className="button secondary" type="button" disabled={processing || activeArticleId === currentArticle.id} onClick={() => processArticle(currentArticle).then(() => loadRun(run.id))}>
+                          {activeArticleId === currentArticle.id ? 'Processando...' : 'Processar esta'}
+                        </button>
+                      )}
+                      <button className="button" type="button" disabled={processing || remainingArticles.length === 0} onClick={processRun}>
+                        {processing ? 'Processando...' : 'Processar pendentes'}
+                      </button>
+                    </div>
                   </div>
-                  <div className="bootstrap-article-grid">
-                    {run.articles.map((article) => (
-                      <article className="bootstrap-article" key={article.id}>
-                        <span className="badge">{activeArticleId === article.id ? 'PROCESSANDO' : article.status}</span>
-                        <strong>{article.title || article.article_url}</strong>
-                        <small>{article.source} · {article.face_count} face(s)</small>
-                        <a href={article.article_url} target="_blank" rel="noreferrer">Abrir matéria</a>
-                      </article>
-                    ))}
-                  </div>
+                  {currentArticle ? (
+                    <article className="bootstrap-review-deck">
+                      <div className="bootstrap-review-nav">
+                        <button className="icon-button" type="button" disabled={activeArticleIndex === 0} onClick={() => setActiveArticleIndex((current) => Math.max(0, current - 1))} aria-label="Matéria anterior">←</button>
+                        <span className="badge">{activeArticleIndex + 1} de {reviewArticles.length}</span>
+                        <button className="icon-button" type="button" disabled={activeArticleIndex >= reviewArticles.length - 1} onClick={() => setActiveArticleIndex((current) => Math.min(reviewArticles.length - 1, current + 1))} aria-label="Próxima matéria">→</button>
+                      </div>
+
+                      <div className="bootstrap-review-header">
+                        <span className="badge">{activeArticleId === currentArticle.id ? 'PROCESSANDO' : currentArticle.status}</span>
+                        <h2>{currentArticle.title || currentArticle.article_url}</h2>
+                        <p className="muted">{currentArticle.source} · {currentArticle.image_count} imagem(ns) · {currentArticle.face_count} face(s)</p>
+                        <a href={currentArticle.article_url} target="_blank" rel="noreferrer">{currentArticle.article_url}</a>
+                        {currentArticle.warnings.length > 0 && (
+                          <details className="bootstrap-warnings">
+                            <summary>{currentArticle.warnings.length} aviso(s)</summary>
+                            <ul>
+                              {currentArticle.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
+                            </ul>
+                          </details>
+                        )}
+                      </div>
+
+                      {currentArticle.images.length === 0 && (
+                        <p className="empty-panel">Nenhuma imagem analisada para esta matéria ainda.</p>
+                      )}
+
+                      <div className="bootstrap-image-list">
+                        {currentArticle.images.map((image) => (
+                          <section className="bootstrap-image-review" key={image.image_id}>
+                            <a className="bootstrap-image-preview" href={image.image_url} target="_blank" rel="noreferrer">
+                              <img src={image.image_url} alt="" />
+                            </a>
+                            <div className="bootstrap-face-review-list">
+                              {image.faces.length === 0 && <p className="muted">Imagem sem faces persistidas.</p>}
+                              {image.faces.map((face) => {
+                                const fieldId = `face-person-${face.face_id}`;
+                                const primaryMatch = face.matches[0];
+                                return (
+                                  <article className="bootstrap-face-review" key={face.face_id}>
+                                    <div className="bootstrap-face">
+                                      <img src={image.image_url} alt="" style={cropStyle(face, image)} />
+                                    </div>
+                                    <div className="bootstrap-face-body">
+                                      <div className="toolbar split">
+                                        <div>
+                                          <strong>{primaryMatch ? primaryMatch.person_name : 'Sem identificação'}</strong>
+                                          {primaryMatch && (
+                                            <p className="muted">{Math.round(primaryMatch.score * 100)}% · {primaryMatch.status}</p>
+                                          )}
+                                        </div>
+                                        {primaryMatch && (
+                                          <div className="toolbar">
+                                            <button className="button secondary compact" type="button" onClick={() => reviewMatch(primaryMatch.id, 'APPROVED')}>Aprovar</button>
+                                            <button className="button secondary compact" type="button" onClick={() => reviewMatch(primaryMatch.id, 'REJECTED')}>Rejeitar</button>
+                                          </div>
+                                        )}
+                                      </div>
+                                      {face.matches.length > 1 && (
+                                        <p className="muted">Outros candidatos: {face.matches.slice(1).map((match) => `${match.person_name} ${Math.round(match.score * 100)}%`).join(' · ')}</p>
+                                      )}
+                                      {face.suggestions.length > 0 && (
+                                        <p className="muted">Sugestões: {face.suggestions.map((suggestion) => suggestion.suggested_name).join(' · ')}</p>
+                                      )}
+                                      <form className="toolbar" onSubmit={(event) => { event.preventDefault(); void assignFace(face); }}>
+                                        <input
+                                          className="input"
+                                          list={fieldId}
+                                          value={groupNames[face.face_id] || ''}
+                                          onChange={(event) => searchPeople(face.face_id, event.target.value)}
+                                          placeholder="Corrigir ou atribuir pessoa"
+                                          required
+                                        />
+                                        <datalist id={fieldId}>
+                                          {(peopleOptions[face.face_id] || []).map((person) => (
+                                            <option key={person.id} value={person.display_name || person.name}>{person.slug}</option>
+                                          ))}
+                                        </datalist>
+                                        <button className="button compact" type="submit">Atribuir</button>
+                                      </form>
+                                    </div>
+                                  </article>
+                                );
+                              })}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    </article>
+                  ) : (
+                    <p className="empty-panel">Nenhuma matéria neste run.</p>
+                  )}
                 </section>
 
                 <section className="admin-queue">
                   <div className="toolbar split">
                     <div>
                       <h2>Grupos para nomear</h2>
-                      <p className="muted">Aprovar um grupo cria match manual e promove as faces como referências da pessoa.</p>
+                      <p className="muted">Atalho secundário para nomear faces desconhecidas semelhantes.</p>
                     </div>
                   </div>
                   {run.groups.length === 0 && <p className="empty-panel">Nenhum grupo desconhecido disponível.</p>}
@@ -484,7 +658,7 @@ export default function BootstrapAdminPage() {
                           <div className="bootstrap-face-strip">
                             {group.faces.slice(0, 12).map((face) => (
                               <a className="bootstrap-face" href={face.article_url || '#'} target="_blank" rel="noreferrer" key={face.face_id} title={face.article_title || ''}>
-                                {face.image_url ? <img src={face.image_url} alt="" style={cropStyle(face)} /> : null}
+                                {face.image_url ? <img src={face.image_url} alt="" /> : null}
                               </a>
                             ))}
                           </div>
