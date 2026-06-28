@@ -154,8 +154,14 @@ def check_frontend_contracts() -> None:
     ok('api.admin.bootstrap_top5_templates', all(item in portal_templates for item in ['source="g1"', 'source="oglobo"', 'source="folha"', 'source="estadao"', 'source="uol"']), 'cinco maiores portais têm templates específicos')
     ok('api.admin.bootstrap_template_rules', all(item in portal_templates for item in ['/politica/noticia/', '/poder/', '.shtml', '/politica/ultimas-noticias/']), 'templates têm padrões específicos de matéria por domínio')
     ok('api.admin.bootstrap_template_selectors', 'link_selectors' in portal_templates and 'search_url_template' in portal_templates and 'gallery_url_patterns' in portal_templates, 'templates preveem seletores, busca e galerias')
+    ok('api.admin.bootstrap_rss_primary', 'rss_url' in portal_templates and '_discover_rss' in bootstrap_service and 'rss_result = _discover_rss' in bootstrap_service, 'bootstrap usa RSS como fonte primária')
+    ok('api.admin.bootstrap_rss_feeds', all(item in portal_templates for item in ['dynamo/politica/rss2.xml', 'feeds.folha.uol.com.br/poder/rss091.xml', 'rss.uol.com.br/feed/noticias.xml']), 'templates declaram feeds RSS reais')
     ok('api.admin.bootstrap_browser_fallback', 'discover_politics_articles' in bootstrap_service and '_discover_browser' in bootstrap_service, 'bootstrap coleta HTML com fallback de browser')
+    match_service = (ROOT / 'apps/api/app/services/match.py').read_text(encoding='utf-8')
     ok('api.admin.bootstrap_groups', 'BOOTSTRAP_GROUP_THRESHOLD' in admin_routes and '_bootstrap_groups' in admin_routes and 'cosine(' in admin_routes, 'bootstrap agrupa desconhecidos por embedding')
+    ok('api.admin.bootstrap_group_threshold', 'group_threshold = max(BOOTSTRAP_GROUP_THRESHOLD, get_settings().face_display_threshold)' in admin_routes, 'agrupamento usa threshold efetivo visível')
+    ok('api.admin.bootstrap_match_threshold', 'max(settings.face_match_threshold, settings.face_display_threshold)' in match_service and 'best_by_person' in match_service, 'matching automático usa threshold visível e deduplica por pessoa')
+    ok('api.admin.bootstrap_groups_ignore_low_auto', 'FaceMatch.score >= settings.face_display_threshold' in admin_routes and 'APPROVED_MANUAL' in admin_routes, 'agrupamento ignora AUTO abaixo do threshold visível')
     ok('api.admin.bootstrap_label_promotes', 'label_bootstrap_group' in admin_routes and 'promote_face_reference' in admin_routes and 'APPROVED_MANUAL' in admin_routes, 'nomear grupo aprova e promove referência')
 
 

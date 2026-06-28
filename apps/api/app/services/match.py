@@ -82,17 +82,30 @@ def _status_for_score(score: float) -> str:
 
 def _match_candidates_pgvector(session: Session, face_embedding: list[float]) -> list[dict]:
     settings = get_settings()
+    threshold = max(settings.face_match_threshold, settings.face_display_threshold)
     query = text(
         """
-        SELECT
-          person_id,
-          1 - (embedding_vector <=> CAST(:embedding AS vector)) AS score,
-          embedding_vector <=> CAST(:embedding AS vector) AS distance
-        FROM faceembedding
-        WHERE
-          embedding_vector IS NOT NULL
-          AND 1 - (embedding_vector <=> CAST(:embedding AS vector)) >= :threshold
-        ORDER BY embedding_vector <=> CAST(:embedding AS vector)
+        SELECT person_id, score, distance
+        FROM (
+          SELECT DISTINCT ON (person_id)
+            person_id,
+            score,
+            distance
+          FROM (
+            SELECT
+              person_id,
+              1 - (embedding_vector <=> CAST(:embedding AS vector)) AS score,
+              embedding_vector <=> CAST(:embedding AS vector) AS distance
+            FROM faceembedding
+            WHERE
+              embedding_vector IS NOT NULL
+              AND 1 - (embedding_vector <=> CAST(:embedding AS vector)) >= :threshold
+          ) scored
+          WHERE
+            score >= :threshold
+          ORDER BY person_id, score DESC
+        ) best_by_person
+        ORDER BY score DESC
         LIMIT :limit
         """
     )
@@ -100,11 +113,11 @@ def _match_candidates_pgvector(session: Session, face_embedding: list[float]) ->
         query,
         params={
             "embedding": _embedding_literal(face_embedding),
-            "threshold": settings.face_match_threshold,
+            "threshold": threshold,
             "limit": settings.max_matches_per_face,
         },
     ).all()
-    return [
+    matches = [
         {
             "person_id": row.person_id if isinstance(row.person_id, UUID) else UUID(str(row.person_id)),
             "score": float(row.score),
@@ -113,28 +126,31 @@ def _match_candidates_pgvector(session: Session, face_embedding: list[float]) ->
         }
         for row in rows
     ]
+    matches.sort(key=lambda item: item["score"], reverse=True)
+    return matches[: settings.max_matches_per_face]
 
 
 def _match_candidates_python(face_embedding: list[float], person_embeddings: list[FaceEmbedding]) -> list[dict]:
     settings = get_settings()
-    threshold = settings.face_match_threshold
+    threshold = max(settings.face_match_threshold, settings.face_display_threshold)
 
-    scored = []
+    best_by_person: dict[UUID, dict] = {}
     for pe in person_embeddings:
         if len(pe.embedding or []) != len(face_embedding):
             continue
         score = cosine(face_embedding, pe.embedding)
         if score < threshold:
             continue
-        scored.append(
-            {
+        existing = best_by_person.get(pe.person_id)
+        if existing is None or score > existing["score"]:
+            best_by_person[pe.person_id] = {
                 "person_id": pe.person_id,
                 "score": score,
                 "status": _status_for_score(score),
                 "distance": 1 - score,
             }
-        )
 
+    scored = list(best_by_person.values())
     scored.sort(key=lambda item: item["score"], reverse=True)
     return scored[: settings.max_matches_per_face]
 

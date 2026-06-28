@@ -19,6 +19,20 @@ Este repositório implementa o **Diga-me / Quem Tá Na Foto?**: API, web admin/h
 - Use `apply_patch` para edições manuais.
 - Não rode migrações destrutivas, deploy ou alterações de produção sem confirmação explícita.
 
+## Servidores Locais
+
+- Para desenvolvimento iterativo, prefira rodar API e web diretamente no host em modo dev, em vez de rebuildar imagens Docker.
+- Use Docker/Compose apenas para dependências locais como Postgres e Redis, salvo quando a tarefa for validar especificamente o build/container.
+- Se `localhost:3000` ou `localhost:8000` estiverem ocupados por containers antigos, pare somente `api` e `web` antes de subir os servidores dev.
+
+Comandos usuais:
+
+```bash
+docker compose -f infra/docker/docker-compose.yml stop api web
+nix develop --command bash -lc 'cd apps/api && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000'
+nix develop --command env NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1 API_BASE_URL=http://localhost:8000/api/v1 pnpm dev -H 0.0.0.0 -p 3000
+```
+
 ## Validação
 
 Antes de finalizar mudanças de código relevantes, rode o que couber:

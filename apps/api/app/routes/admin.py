@@ -376,17 +376,25 @@ def _face_context_payload(session: Session, face: DetectedFace) -> dict | None:
 
 
 def _face_has_active_match(session: Session, face_id: UUID) -> bool:
+    settings = get_settings()
     return bool(
         session.exec(
             select(FaceMatch).where(
                 FaceMatch.detected_face_id == face_id,
-                FaceMatch.status.in_(ACTIVE_MATCH_STATUS),
+                (
+                    FaceMatch.status.in_({"APPROVED", "APPROVED_MANUAL"})
+                    | (
+                        FaceMatch.status.in_({"AUTO", "AUTO_APPROVED"})
+                        & (FaceMatch.score >= settings.face_display_threshold)
+                    )
+                ),
             )
         ).first()
     )
 
 
 def _bootstrap_groups(session: Session, run_id: UUID) -> list[dict]:
+    group_threshold = max(BOOTSTRAP_GROUP_THRESHOLD, get_settings().face_display_threshold)
     run_articles = session.exec(
         select(BootstrapRunArticle).where(BootstrapRunArticle.run_id == run_id)
     ).all()
@@ -412,7 +420,7 @@ def _bootstrap_groups(session: Session, run_id: UUID) -> list[dict]:
         placed = False
         for group in groups:
             representative = group["faces"][0]["embedding"]
-            if cosine(candidate["embedding"], representative) >= BOOTSTRAP_GROUP_THRESHOLD:
+            if cosine(candidate["embedding"], representative) >= group_threshold:
                 group["faces"].append(candidate)
                 placed = True
                 break

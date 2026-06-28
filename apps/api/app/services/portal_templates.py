@@ -17,6 +17,7 @@ class PortalTemplate:
     source: str
     domain: str
     url: str
+    rss_url: str | None = None
     article_url_patterns: tuple[str, ...] = ()
     blocked_url_patterns: tuple[str, ...] = ()
     gallery_url_patterns: tuple[str, ...] = ()
@@ -70,6 +71,7 @@ PORTAL_TEMPLATES: tuple[PortalTemplate, ...] = (
         source="g1",
         domain="g1.globo.com",
         url="https://g1.globo.com/politica/",
+        rss_url="https://g1.globo.com/dynamo/politica/rss2.xml",
         article_url_patterns=(
             r"https://g1\.globo\.com/politica/(?:eleicoes/\d{4}/)?noticia/\d{4}/\d{2}/\d{2}/.+\.ghtml(?:\?.*)?$",
             r"https://g1\.globo\.com/.+/eleicoes/\d{4}/noticia/\d{4}/\d{2}/\d{2}/.+\.ghtml(?:\?.*)?$",
@@ -95,6 +97,7 @@ PORTAL_TEMPLATES: tuple[PortalTemplate, ...] = (
         source="oglobo",
         domain="oglobo.globo.com",
         url="https://oglobo.globo.com/politica/",
+        rss_url="https://oglobo.globo.com/rss.xml",
         article_url_patterns=(
             r"https://oglobo\.globo\.com/politica/noticia/\d{4}/\d{2}/\d{2}/.+\.ghtml(?:\?.*)?$",
         ),
@@ -117,16 +120,17 @@ PORTAL_TEMPLATES: tuple[PortalTemplate, ...] = (
         source="folha",
         domain="www1.folha.uol.com.br",
         url="https://www1.folha.uol.com.br/poder/",
+        rss_url="https://feeds.folha.uol.com.br/poder/rss091.xml",
         article_url_patterns=(
             r"https://www1\.folha\.uol\.com\.br/poder/\d{4}/\d{2}/.+\.shtml(?:\?.*)?$",
             r"https://www1\.folha\.uol\.com\.br/poder/eleicoes/\d{4}/\d{4}/\d{2}/.+\.shtml(?:\?.*)?$",
+            r"https://www1\.folha\.uol\.com\.br/colunas/painel/\d{4}/\d{2}/.+\.shtml(?:\?.*)?$",
         ),
         blocked_url_patterns=GENERIC_BLOCKED_URL_PATTERNS
         + (
             r"/poder/(?:stf|folhajus|governo-lula)/?$",
             r"/poder/eleicoes/\d{4}/?$",
             r"/blogs/",
-            r"/colunas/",
             r"/paineldoleitor/",
             r"/folha-topicos/",
         ),
@@ -142,6 +146,7 @@ PORTAL_TEMPLATES: tuple[PortalTemplate, ...] = (
         source="estadao",
         domain="www.estadao.com.br",
         url="https://www.estadao.com.br/politica/",
+        rss_url="https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/politica/?body=%7B%22layout%22:%22google-news%22%7D",
         article_url_patterns=(
             r"https://www\.estadao\.com\.br/politica/(?!$)(?!#)(?!coluna-do-estadao/?$)(?!blog-do-fausto-macedo/?$).+/?(?:\?.*)?$",
         ),
@@ -164,6 +169,7 @@ PORTAL_TEMPLATES: tuple[PortalTemplate, ...] = (
         source="uol",
         domain="noticias.uol.com.br",
         url="https://noticias.uol.com.br/politica/",
+        rss_url="https://rss.uol.com.br/feed/noticias.xml",
         article_url_patterns=(
             r"https://noticias\.uol\.com\.br/politica/ultimas-noticias/\d{4}/\d{2}/\d{2}/.+\.htm(?:\?.*)?$",
         ),
@@ -186,41 +192,53 @@ PORTAL_TEMPLATES: tuple[PortalTemplate, ...] = (
         source="cnn",
         domain="www.cnnbrasil.com.br",
         url="https://www.cnnbrasil.com.br/politica/",
-        article_url_patterns=GENERIC_ARTICLE_URL_PATTERNS,
+        rss_url="https://www.cnnbrasil.com.br/feed/",
+        article_url_patterns=(r"https://www\.cnnbrasil\.com\.br/politica/.+",),
         blocked_url_patterns=GENERIC_BLOCKED_URL_PATTERNS,
         search_url_template="https://www.cnnbrasil.com.br/?s={query}",
+        require_article_pattern=True,
     ),
     PortalTemplate(
         source="metropoles",
         domain="www.metropoles.com",
         url="https://www.metropoles.com/brasil/politica-brasil",
-        article_url_patterns=GENERIC_ARTICLE_URL_PATTERNS,
+        rss_url="https://www.metropoles.com/brasil/politica-brasil/feed",
+        article_url_patterns=(r"https://www\.metropoles\.com/(?:brasil/politica-brasil|colunas/.+|.+politica).+",),
         blocked_url_patterns=GENERIC_BLOCKED_URL_PATTERNS,
         search_url_template="https://www.metropoles.com/search?q={query}",
+        require_article_pattern=True,
     ),
     PortalTemplate(
         source="poder360",
         domain="www.poder360.com.br",
         url="https://www.poder360.com.br/",
-        article_url_patterns=GENERIC_ARTICLE_URL_PATTERNS,
+        rss_url="https://www.poder360.com.br/feed/",
+        article_url_patterns=(
+            r"https://www\.poder360\.com\.br/(?:poder-congresso|poder-governo|poder-justica|poder-eleitoral|eleicoes)/.+",
+        ),
         blocked_url_patterns=GENERIC_BLOCKED_URL_PATTERNS,
         search_url_template="https://www.poder360.com.br/?s={query}",
+        require_article_pattern=True,
     ),
     PortalTemplate(
         source="cartacapital",
         domain="www.cartacapital.com.br",
         url="https://www.cartacapital.com.br/politica/",
-        article_url_patterns=GENERIC_ARTICLE_URL_PATTERNS,
+        rss_url="https://www.cartacapital.com.br/politica/feed/",
+        article_url_patterns=(r"https://www\.cartacapital\.com\.br/(?:politica|politica/.+|.+eleicoes).+",),
         blocked_url_patterns=GENERIC_BLOCKED_URL_PATTERNS,
         search_url_template="https://www.cartacapital.com.br/?s={query}",
+        require_article_pattern=True,
     ),
     PortalTemplate(
         source="brasildefato",
         domain="www.brasildefato.com.br",
         url="https://www.brasildefato.com.br/editoria/politica",
-        article_url_patterns=GENERIC_ARTICLE_URL_PATTERNS,
+        rss_url="https://www.brasildefato.com.br/editoria/politica/feed/",
+        article_url_patterns=(r"https://www\.brasildefato\.com\.br/.+",),
         blocked_url_patterns=GENERIC_BLOCKED_URL_PATTERNS,
         search_url_template="https://www.brasildefato.com.br/busca?search={query}",
+        require_article_pattern=True,
     ),
 )
 
