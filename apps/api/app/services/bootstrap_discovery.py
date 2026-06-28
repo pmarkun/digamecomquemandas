@@ -3,19 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html.parser import HTMLParser
 import re
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
 from ..config import get_settings
 from .article_image_discovery import _headers
-
-
-@dataclass(frozen=True)
-class PoliticsSource:
-    source: str
-    domain: str
-    url: str
+from .portal_templates import POLITICS_SOURCES, PORTAL_TEMPLATES, PortalTemplate, PoliticsSource, template_for_source
 
 
 @dataclass
@@ -35,30 +29,12 @@ class SourceDiscoveryResult:
     warnings: list[str]
 
 
-POLITICS_SOURCES = [
-    PoliticsSource("g1", "g1.globo.com", "https://g1.globo.com/politica/"),
-    PoliticsSource("oglobo", "oglobo.globo.com", "https://oglobo.globo.com/politica/"),
-    PoliticsSource("folha", "www1.folha.uol.com.br", "https://www1.folha.uol.com.br/poder/"),
-    PoliticsSource("estadao", "www.estadao.com.br", "https://www.estadao.com.br/politica/"),
-    PoliticsSource("uol", "noticias.uol.com.br", "https://noticias.uol.com.br/politica/"),
-    PoliticsSource("cnn", "www.cnnbrasil.com.br", "https://www.cnnbrasil.com.br/politica/"),
-    PoliticsSource("metropoles", "www.metropoles.com", "https://www.metropoles.com/brasil/politica-brasil"),
-    PoliticsSource("poder360", "www.poder360.com.br", "https://www.poder360.com.br/"),
-    PoliticsSource("cartacapital", "www.cartacapital.com.br", "https://www.cartacapital.com.br/politica/"),
-    PoliticsSource("brasildefato", "www.brasildefato.com.br", "https://www.brasildefato.com.br/editoria/politica"),
-]
-
-BLOCKED_LINK_HINTS = re.compile(
-    r"login|assine|newsletter|podcast|video|videos|ao-vivo|tempo-real|colun|opiniao|"
-    r"publicidade|privacy|politica-de-privacidade|termos|rss|whatsapp|facebook|instagram|"
-    r"youtube|twitter|x.com|mailto:|javascript:",
-    re.IGNORECASE,
-)
 ARTICLE_PATH_HINTS = re.compile(
     r"/(politica|poder|brasil|noticias|202[0-9]|governo|congresso|senado|camara|"
     r"supremo|stf|eleicoes|planalto|lula|bolsonaro|haddad|tebet|marina)",
     re.IGNORECASE,
 )
+TRACKING_QUERY_KEYS = {"fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
 
 
 class _ArticleLinkParser(HTMLParser):
@@ -96,38 +72,53 @@ class _ArticleLinkParser(HTMLParser):
 
 def _normalize_url(url: str) -> str:
     parsed = urlparse(url)
-    return urlunparse((parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/") or "/", "", parsed.query, ""))
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in TRACKING_QUERY_KEYS and not key.lower().startswith("utm_")
+        ]
+    )
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/") or "/", "", query, ""))
 
 
-def _score_link(source: PoliticsSource, href: str, text: str) -> ArticleCandidate | None:
-    absolute = _normalize_url(urljoin(source.url, href))
+def _score_link(template: PortalTemplate, href: str, text: str) -> ArticleCandidate | None:
+    absolute = _normalize_url(urljoin(template.url, href))
     parsed = urlparse(absolute)
     if parsed.scheme not in {"http", "https"}:
         return None
-    if parsed.netloc.lower().replace("www.", "") != source.domain.replace("www.", ""):
+    if not template.accepts_domain(parsed.netloc):
         return None
-    lowered = f"{absolute} {text}".lower()
-    if BLOCKED_LINK_HINTS.search(lowered):
+    if template.is_blocked_url(absolute, text):
         return None
-    if re.search(r"\.(jpg|jpeg|png|webp|gif|svg|pdf)(?:$|\?)", parsed.path, re.IGNORECASE):
+    if parsed.path.rstrip("/") == urlparse(template.url).path.rstrip("/"):
+        return None
+
+    article_match = template.is_article_url(absolute)
+    gallery_match = template.is_gallery_url(absolute)
+    if template.require_article_pattern and not article_match and not gallery_match:
         return None
 
     score = 1.0
-    if ARTICLE_PATH_HINTS.search(parsed.path):
+    if article_match:
+        score += 4.0
+    elif ARTICLE_PATH_HINTS.search(parsed.path):
         score += 2.0
-    if len(text.strip()) >= 30:
+    if gallery_match:
+        score += 1.5
+    if len(text.strip()) >= template.min_title_length:
         score += 1.0
     if re.search(r"/202[0-9]/|/20[0-9]{2}/[0-9]{2}/", parsed.path):
         score += 1.0
-    if parsed.path.rstrip("/") == urlparse(source.url).path.rstrip("/"):
-        return None
+    if re.search(r"\.(ghtml|shtml|htm)$", parsed.path, re.IGNORECASE):
+        score += 0.5
     if score < 2.0:
         return None
 
     return ArticleCandidate(
-        source=source.source,
-        domain=source.domain,
-        section_url=source.url,
+        source=template.source,
+        domain=template.domain,
+        section_url=template.url,
         article_url=absolute,
         title=text.strip() or None,
         score=score,
@@ -143,39 +134,43 @@ def _dedupe(candidates: list[ArticleCandidate], limit: int) -> list[ArticleCandi
     return list(by_url.values())[:limit]
 
 
-def _discover_html(source: PoliticsSource, limit: int) -> SourceDiscoveryResult:
+def _discover_html(source: PoliticsSource | PortalTemplate, limit: int) -> SourceDiscoveryResult:
+    template = template_for_source(source)
+    source_record = template.as_source()
     settings = get_settings()
     warnings: list[str] = []
     try:
         with httpx.Client(
             timeout=settings.article_discovery_timeout_seconds,
             follow_redirects=True,
-            headers=_headers(source.url),
+            headers=_headers(template.url),
         ) as client:
-            response = client.get(source.url)
+            response = client.get(template.url)
         response.raise_for_status()
     except Exception as exc:
-        return SourceDiscoveryResult(source=source, articles=[], warnings=[f"HTML não carregado: {exc}"])
+        return SourceDiscoveryResult(source=source_record, articles=[], warnings=[f"HTML não carregado: {exc}"])
 
-    parser = _ArticleLinkParser(str(response.url), source)
+    parser = _ArticleLinkParser(str(response.url), source_record)
     parser.feed(response.text)
     articles = [
         candidate
         for href, text in parser.links
-        if (candidate := _score_link(source, href, text)) is not None
+        if (candidate := _score_link(template, href, text)) is not None
     ]
     limited = _dedupe(articles, limit)
     if not limited:
         warnings.append("Nenhum link provável de matéria encontrado no HTML estático.")
-    return SourceDiscoveryResult(source=source, articles=limited, warnings=warnings)
+    return SourceDiscoveryResult(source=source_record, articles=limited, warnings=warnings)
 
 
-def _discover_browser(source: PoliticsSource, limit: int) -> SourceDiscoveryResult:
+def _discover_browser(source: PoliticsSource | PortalTemplate, limit: int) -> SourceDiscoveryResult:
+    template = template_for_source(source)
+    source_record = template.as_source()
     settings = get_settings()
     try:
         from playwright.sync_api import sync_playwright
     except Exception as exc:
-        return SourceDiscoveryResult(source=source, articles=[], warnings=[f"Playwright indisponível: {exc}"])
+        return SourceDiscoveryResult(source=source_record, articles=[], warnings=[f"Playwright indisponível: {exc}"])
 
     try:
         with sync_playwright() as playwright:
@@ -185,43 +180,61 @@ def _discover_browser(source: PoliticsSource, limit: int) -> SourceDiscoveryResu
             browser = playwright.chromium.launch(**launch_args)
             page = browser.new_page(
                 locale="pt-BR",
-                user_agent=_headers(source.url)["user-agent"],
+                user_agent=_headers(template.url)["user-agent"],
                 viewport={"width": 1366, "height": 900},
             )
-            page.goto(source.url, wait_until="domcontentloaded", timeout=int(settings.article_discovery_timeout_seconds * 1000))
+            page.goto(template.url, wait_until="domcontentloaded", timeout=int(settings.article_discovery_timeout_seconds * 1000))
             page.wait_for_timeout(1200)
             payload = page.evaluate(
-                """() => Array.from(document.links).map((link) => ({
-                    href: link.href || link.getAttribute('href') || '',
-                    text: link.innerText || link.getAttribute('aria-label') || link.getAttribute('title') || ''
-                }))"""
+                """(selectors) => {
+                    const links = [];
+                    const seen = new Set();
+                    for (const selector of selectors) {
+                        for (const link of document.querySelectorAll(selector)) {
+                            const href = link.href || link.getAttribute('href') || '';
+                            const key = `${href}::${link.innerText || ''}`;
+                            if (!href || seen.has(key)) continue;
+                            seen.add(key);
+                            links.push({
+                                href,
+                                text: link.innerText || link.getAttribute('aria-label') || link.getAttribute('title') || ''
+                            });
+                        }
+                    }
+                    return links;
+                }""",
+                list(template.link_selectors),
             )
             browser.close()
     except Exception as exc:
-        return SourceDiscoveryResult(source=source, articles=[], warnings=[f"Navegador não renderizou editoria: {exc}"])
+        return SourceDiscoveryResult(source=source_record, articles=[], warnings=[f"Navegador não renderizou editoria: {exc}"])
 
     articles = [
         candidate
         for item in payload
-        if (candidate := _score_link(source, item.get("href") or "", item.get("text") or "")) is not None
+        if (candidate := _score_link(template, item.get("href") or "", item.get("text") or "")) is not None
     ]
     limited = _dedupe(articles, limit)
-    return SourceDiscoveryResult(source=source, articles=limited, warnings=[] if limited else ["Nenhum link provável encontrado via navegador."])
+    return SourceDiscoveryResult(
+        source=source_record,
+        articles=limited,
+        warnings=[] if limited else ["Nenhum link provável encontrado via navegador."],
+    )
 
 
 def discover_politics_articles(limit_per_source: int, render_browser: bool) -> list[SourceDiscoveryResult]:
     results: list[SourceDiscoveryResult] = []
-    for source in POLITICS_SOURCES:
-        html_result = _discover_html(source, limit_per_source)
+    for template in PORTAL_TEMPLATES:
+        html_result = _discover_html(template, limit_per_source)
         if len(html_result.articles) >= limit_per_source or not render_browser:
             results.append(html_result)
             continue
 
-        browser_result = _discover_browser(source, limit_per_source)
+        browser_result = _discover_browser(template, limit_per_source)
         merged = _dedupe(html_result.articles + browser_result.articles, limit_per_source)
         results.append(
             SourceDiscoveryResult(
-                source=source,
+                source=html_result.source,
                 articles=merged,
                 warnings=html_result.warnings + browser_result.warnings,
             )
