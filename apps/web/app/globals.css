@@ -1176,6 +1176,12 @@ button {
   overflow-wrap: anywhere;
 }
 
+.article-admin-form {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+}
+
 .quote-line {
   border-left: 3px solid #d94a38;
   padding-left: 0.75rem;

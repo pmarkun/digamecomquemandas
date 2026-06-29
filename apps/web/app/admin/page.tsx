@@ -80,7 +80,22 @@ type AllowedDomain = {
   enabled: boolean;
 };
 
-type QueueKey = 'suggestions' | 'matches' | 'people' | 'optouts' | 'allowlist' | 'audit';
+type AdminArticle = {
+  id: string;
+  url: string;
+  canonical_url?: string;
+  domain: string;
+  title?: string;
+  captured_at?: string;
+  created_at?: string;
+  image_count: number;
+  face_count: number;
+  match_count: number;
+  suggestion_count: number;
+  thumbnail_url?: string;
+};
+
+type QueueKey = 'suggestions' | 'matches' | 'articles' | 'people' | 'optouts' | 'allowlist' | 'audit';
 
 type PersonForm = {
   name: string;
@@ -136,8 +151,12 @@ export default function AdminPage() {
   const [optouts, setOptouts] = useState<Optout[]>([]);
   const [audits, setAudits] = useState<AuditLog[]>([]);
   const [allowedDomains, setAllowedDomains] = useState<AllowedDomain[]>([]);
+  const [articles, setArticles] = useState<AdminArticle[]>([]);
   const [newDomain, setNewDomain] = useState('');
   const [personQuery, setPersonQuery] = useState('');
+  const [articleQuery, setArticleQuery] = useState('');
+  const [editingArticleId, setEditingArticleId] = useState<string | null>(null);
+  const [articleForm, setArticleForm] = useState({ title: '', url: '', domain: '', canonical_url: '' });
   const [activeQueue, setActiveQueue] = useState<QueueKey>('suggestions');
   const [showSuggestionHistory, setShowSuggestionHistory] = useState(false);
   const [matchStatus, setMatchStatus] = useState('');
@@ -158,13 +177,17 @@ export default function AdminPage() {
       const headers = headersFor(authToken);
       const suggestionPath = includeSuggestionHistory ? '/admin/suggestions?status=' : '/admin/suggestions';
       const matchPath = nextMatchStatus ? `/admin/matches?status=${encodeURIComponent(nextMatchStatus)}` : '/admin/matches';
-      const [listPeople, listSuggestions, listMatches, listOptouts, listAudits, listAllowedDomains] = await Promise.all([
+      const articlePath = articleQuery.trim()
+        ? `/admin/articles?query=${encodeURIComponent(articleQuery.trim())}&limit=50`
+        : '/admin/articles?limit=50';
+      const [listPeople, listSuggestions, listMatches, listOptouts, listAudits, listAllowedDomains, listArticles] = await Promise.all([
         api.get<Person[]>(`/admin/people`, headers),
         api.get<Suggestion[]>(suggestionPath, headers),
         api.get<Match[]>(matchPath, headers),
         api.get<Optout[]>(`/admin/optout-requests`, headers),
         api.get<AuditLog[]>(`/admin/audit-logs`, headers),
         api.get<AllowedDomain[]>(`/admin/allowed-domains`, headers),
+        api.get<AdminArticle[]>(articlePath, headers),
       ]);
       setPeople(listPeople);
       setSuggestions(listSuggestions);
@@ -172,6 +195,7 @@ export default function AdminPage() {
       setOptouts(listOptouts);
       setAudits(listAudits);
       setAllowedDomains(listAllowedDomains);
+      setArticles(listArticles);
     } finally {
       setLoading(false);
     }
@@ -295,9 +319,55 @@ export default function AdminPage() {
     await loadProtected();
   };
 
+  const searchArticles = async (event: FormEvent) => {
+    event.preventDefault();
+    await loadProtected();
+  };
+
+  const startEditArticle = (article: AdminArticle) => {
+    setEditingArticleId(article.id);
+    setArticleForm({
+      title: article.title || '',
+      url: article.url,
+      domain: article.domain,
+      canonical_url: article.canonical_url || '',
+    });
+  };
+
+  const saveArticle = async (articleId: string) => {
+    const url = articleForm.url.trim();
+    if (!url) {
+      setFeedback('Informe a URL da matéria.');
+      return;
+    }
+    await api.post(
+      `/admin/articles/${articleId}/update`,
+      {
+        title: articleForm.title.trim() || null,
+        url,
+        domain: articleForm.domain.trim() || null,
+        canonical_url: articleForm.canonical_url.trim() || null,
+      },
+      headersFor(),
+    );
+    setEditingArticleId(null);
+    setFeedback('Matéria atualizada.');
+    await loadProtected();
+  };
+
+  const deleteArticle = async (article: AdminArticle) => {
+    if (!confirm(`Apagar a matéria "${article.title || article.url}" e todas as faces/imagens vinculadas?`)) {
+      return;
+    }
+    await api.post(`/admin/articles/${article.id}/delete`, {}, headersFor());
+    setFeedback('Matéria apagada.');
+    await loadProtected();
+  };
+
   const queues: Array<{ key: QueueKey; label: string; count: number }> = [
     { key: 'suggestions', label: showSuggestionHistory ? 'Sugestões' : 'Sugestões pendentes', count: suggestions.length },
     { key: 'matches', label: 'Matches', count: matches.length },
+    { key: 'articles', label: 'Matérias', count: articles.length },
     { key: 'people', label: 'Pessoas', count: people.length },
     { key: 'optouts', label: 'Opt-out', count: optouts.length },
     { key: 'allowlist', label: 'Allowlist', count: allowedDomains.length },
@@ -352,7 +422,7 @@ export default function AdminPage() {
               <div className="stat"><strong>{people.length}</strong><span>Pessoas</span></div>
               <div className="stat"><strong>{matches.length}</strong><span>Matches na fila</span></div>
               <div className="stat"><strong>{suggestions.length}</strong><span>{showSuggestionHistory ? 'Sugestões no histórico' : 'Sugestões pendentes'}</span></div>
-              <div className="stat"><strong>{optouts.length}</strong><span>Pedidos</span></div>
+              <div className="stat"><strong>{articles.length}</strong><span>Matérias recentes</span></div>
             </section>
 
             {showPersonForm && (
@@ -476,6 +546,68 @@ export default function AdminPage() {
                           <button className="button" type="button" onClick={() => reviewMatch(item.id, 'APPROVED')}>Aprovar</button>
                           <button className="button secondary" type="button" onClick={() => reviewMatch(item.id, 'REJECTED')}>Rejeitar</button>
                         </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {activeQueue === 'articles' && (
+              <section className="admin-queue">
+                <div className="toolbar split">
+                  <div>
+                    <h2>Matérias e imagens associadas</h2>
+                    <p className="muted">Corrija título/URL/domínio ou apague entradas duplicadas e testes que poluíram as notícias recentes.</p>
+                  </div>
+                  <form className="toolbar" onSubmit={searchArticles}>
+                    <input
+                      className="input"
+                      value={articleQuery}
+                      onChange={(event) => setArticleQuery(event.target.value)}
+                      placeholder="Buscar por título, URL ou domínio"
+                    />
+                    <button className="button secondary" type="submit">Buscar</button>
+                  </form>
+                </div>
+                {articles.length === 0 && <p className="empty-panel">Nenhuma matéria encontrada.</p>}
+                <div className="review-card-list">
+                  {articles.map((article) => (
+                    <article className="review-card" key={article.id}>
+                      {article.thumbnail_url ? <img className="review-card-media" src={article.thumbnail_url} alt="" /> : <div className="review-card-media placeholder">sem imagem</div>}
+                      <div className="review-card-body">
+                        <div className="toolbar split">
+                          <div>
+                            <p className="eyebrow">{article.domain} · {compactDate(article.captured_at)}</p>
+                            <h3><a href={`/materia/${article.id}`} target="_blank" rel="noreferrer">{article.title || 'Matéria sem título'}</a></h3>
+                          </div>
+                          <span className="badge">{article.image_count} img · {article.face_count} faces</span>
+                        </div>
+                        {editingArticleId === article.id ? (
+                          <div className="article-admin-form">
+                            <input className="input" value={articleForm.title} onChange={(event) => setArticleForm({ ...articleForm, title: event.target.value })} placeholder="Título" />
+                            <input className="input" value={articleForm.url} onChange={(event) => setArticleForm({ ...articleForm, url: event.target.value })} placeholder="URL da matéria" />
+                            <input className="input" value={articleForm.domain} onChange={(event) => setArticleForm({ ...articleForm, domain: event.target.value })} placeholder="Domínio" />
+                            <input className="input" value={articleForm.canonical_url} onChange={(event) => setArticleForm({ ...articleForm, canonical_url: event.target.value })} placeholder="URL canônica opcional" />
+                            <div className="toolbar">
+                              <button className="button" type="button" onClick={() => saveArticle(article.id)}>Salvar</button>
+                              <button className="button secondary" type="button" onClick={() => setEditingArticleId(null)}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <a href={article.url} target="_blank" rel="noreferrer">{article.url}</a>
+                            <div className="technical-line">
+                              <span>{article.match_count} match(es)</span>
+                              <span>{article.suggestion_count} sugestão(ões)</span>
+                              <span>id {article.id.slice(0, 8)}</span>
+                            </div>
+                            <div className="toolbar">
+                              <button className="button" type="button" onClick={() => startEditArticle(article)}>Corrigir</button>
+                              <button className="button secondary" type="button" onClick={() => deleteArticle(article)}>Apagar</button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </article>
                   ))}

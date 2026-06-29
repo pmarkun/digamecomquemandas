@@ -7,6 +7,7 @@ import unicodedata
 from typing import Final
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from ..config import get_settings
@@ -28,6 +29,7 @@ from ..models import (
 )
 from ..schemas import (
     AdminAddFacesIn,
+    ArticleUpdateIn,
     BootstrapAssignFaceIn,
     BootstrapLabelGroupIn,
     BootstrapRunArticleAttach,
@@ -59,7 +61,7 @@ ALLOWED_SUGGESTION_STATUS: Final = {
 }
 BOOTSTRAP_GROUP_THRESHOLD: Final = 0.88
 ACTIVE_MATCH_STATUS: Final = {"AUTO", "AUTO_APPROVED", "APPROVED", "APPROVED_MANUAL"}
-TRACKING_QUERY_KEYS: Final = {"fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
+TRACKING_QUERY_KEYS: Final = {"diga_probe", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
 
 
 def _require_admin(
@@ -98,6 +100,80 @@ def _known_article_urls(session: Session) -> set[str]:
     urls = {url for url in session.exec(select(Article.url)).all() if url}
     urls.update(url for url in session.exec(select(BootstrapRunArticle.article_url)).all() if url)
     return {_normalize_article_url(url) for url in urls}
+
+
+def _article_admin_payload(session: Session, article: Article) -> dict:
+    images = session.exec(select(ArticleImage).where(ArticleImage.article_id == article.id)).all()
+    image_ids = [image.id for image in images]
+    faces = []
+    if image_ids:
+        faces = session.exec(select(DetectedFace).where(DetectedFace.article_image_id.in_(image_ids))).all()
+    face_ids = [face.id for face in faces]
+    matches = []
+    suggestions = []
+    if face_ids:
+        matches = session.exec(select(FaceMatch).where(FaceMatch.detected_face_id.in_(face_ids))).all()
+        suggestions = session.exec(select(FaceSuggestion).where(FaceSuggestion.detected_face_id.in_(face_ids))).all()
+    return {
+        "id": str(article.id),
+        "url": article.url,
+        "canonical_url": article.canonical_url,
+        "domain": article.domain,
+        "title": article.title,
+        "published_at": article.published_at,
+        "captured_at": article.captured_at,
+        "created_at": article.created_at,
+        "image_count": len(images),
+        "face_count": len(faces),
+        "match_count": len(matches),
+        "suggestion_count": len(suggestions),
+        "thumbnail_url": next((image.image_url for image in images if image.image_url), None),
+    }
+
+
+def _delete_article_tree(session: Session, article: Article) -> dict:
+    images = session.exec(select(ArticleImage).where(ArticleImage.article_id == article.id)).all()
+    image_ids = [image.id for image in images]
+    faces = []
+    if image_ids:
+        faces = session.exec(select(DetectedFace).where(DetectedFace.article_image_id.in_(image_ids))).all()
+    face_ids = [face.id for face in faces]
+
+    deleted = {
+        "images": len(images),
+        "faces": len(faces),
+        "matches": 0,
+        "suggestions": 0,
+        "bootstrap_links": 0,
+    }
+    if face_ids:
+        suggestions = session.exec(select(FaceSuggestion).where(FaceSuggestion.detected_face_id.in_(face_ids))).all()
+        matches = session.exec(select(FaceMatch).where(FaceMatch.detected_face_id.in_(face_ids))).all()
+        for suggestion in suggestions:
+            session.delete(suggestion)
+        for match in matches:
+            session.delete(match)
+        deleted["suggestions"] = len(suggestions)
+        deleted["matches"] = len(matches)
+
+    for face in faces:
+        session.delete(face)
+    for image in images:
+        session.delete(image)
+
+    bootstrap_links = session.exec(select(BootstrapRunArticle).where(BootstrapRunArticle.article_id == article.id)).all()
+    for item in bootstrap_links:
+        item.article_id = None
+        item.status = "DELETED"
+        item.image_count = 0
+        item.face_count = 0
+        item.updated_at = datetime.now(timezone.utc)
+        item.warnings = [*item.warnings, "Matéria vinculada apagada pelo admin."]
+        session.add(item)
+    deleted["bootstrap_links"] = len(bootstrap_links)
+
+    session.delete(article)
+    return deleted
 
 
 @router.post("/login", response_model=LoginOut)
@@ -1202,6 +1278,93 @@ def optout_person(person_id: str, session: Session = Depends(get_session), _: bo
         entity_id=person.id,
     )
     return {"ok": True}
+
+
+@router.get("/articles")
+def list_admin_articles(
+    query: str | None = None,
+    limit: int = 30,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    bounded_limit = max(1, min(limit, 100))
+    stmt = select(Article).order_by(Article.captured_at.desc())
+    if query:
+        normalized_query = query.strip()
+        if normalized_query:
+            like = f"%{normalized_query}%"
+            normalized_url = _normalize_article_url(normalized_query) if normalized_query.startswith(("http://", "https://")) else None
+            conditions = [Article.title.ilike(like), Article.url.ilike(like), Article.domain.ilike(like)]
+            if normalized_url:
+                conditions.append(Article.url == normalized_url)
+            stmt = stmt.where(or_(*conditions))
+    articles = session.exec(stmt.limit(bounded_limit)).all()
+    return [_article_admin_payload(session, article) for article in articles]
+
+
+@router.post("/articles/{article_id}/update")
+def update_admin_article(
+    article_id: str,
+    payload: ArticleUpdateIn,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    article = session.get(Article, _as_uuid(article_id))
+    if not article:
+        raise HTTPException(status_code=404, detail="Matéria não encontrada")
+
+    normalized_url = _normalize_article_url(payload.url.strip())
+    if not normalized_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL inválida")
+
+    existing = session.exec(select(Article).where(Article.url == normalized_url)).first()
+    if existing and existing.id != article.id:
+        raise HTTPException(status_code=409, detail="Já existe outra matéria com essa URL")
+
+    parsed = urlparse(normalized_url)
+    old = {"url": article.url, "title": article.title, "domain": article.domain}
+    article.url = normalized_url
+    article.canonical_url = payload.canonical_url.strip() if payload.canonical_url else None
+    article.domain = (payload.domain or parsed.netloc).strip().lower()
+    article.title = payload.title.strip() if payload.title else None
+    session.add(article)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="update_article",
+        entity_type="article",
+        entity_id=article.id,
+        metadata={"old": old, "new": {"url": article.url, "title": article.title, "domain": article.domain}},
+    )
+    session.commit()
+    session.refresh(article)
+    return {"ok": True, "article": _article_admin_payload(session, article)}
+
+
+@router.post("/articles/{article_id}/delete")
+def delete_admin_article(
+    article_id: str,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    article = session.get(Article, _as_uuid(article_id))
+    if not article:
+        raise HTTPException(status_code=404, detail="Matéria não encontrada")
+
+    article_id_value = article.id
+    deleted = _delete_article_tree(session, article)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="delete_article",
+        entity_type="article",
+        entity_id=article_id_value,
+        metadata=deleted,
+    )
+    session.commit()
+    return {"ok": True, "deleted": deleted}
 
 
 @router.get("/suggestions")

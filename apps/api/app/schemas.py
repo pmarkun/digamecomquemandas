@@ -198,6 +198,13 @@ class MatchReassignIn(BaseModel):
     status: str = "APPROVED"
 
 
+class ArticleUpdateIn(BaseModel):
+    url: str
+    title: str | None = None
+    domain: str | None = None
+    canonical_url: str | None = None
+
+
 class ContestRequest(BaseModel):
     requester_name: str
     requester_email: str

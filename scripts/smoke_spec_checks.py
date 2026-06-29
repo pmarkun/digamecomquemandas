@@ -135,6 +135,7 @@ def check_frontend_contracts() -> None:
     ok('web.admin.bootstrap_ignore_image', 'Ignorar imagem' in bootstrap_page and '/article-images/${image.image_id}/ignore' in bootstrap_page, 'bootstrap permite ignorar imagem inteira')
     ok('web.admin.bootstrap_dedupes_image_variants', 'dedupeImageVariants' in bootstrap_processor and 'imageVariantKey' in bootstrap_processor, 'bootstrap ignora variantes menores da mesma imagem')
     ok('web.admin.bootstrap_min_dimension_env', 'NEXT_PUBLIC_BOOTSTRAP_MIN_IMAGE_DIMENSION' in bootstrap_processor and 'isTooSmallForBootstrap' in bootstrap_processor, 'bootstrap filtra imagens pequenas por env')
+    ok('web.admin.article_panel', "'articles'" in admin_page and 'Matérias e imagens associadas' in admin_page and '/admin/articles/${article.id}/delete' in admin_page, 'admin tem painel para corrigir e apagar matérias')
     profile_page = (ROOT / 'apps/web/app/pessoa/[slug]/page.tsx').read_text(encoding='utf-8')
     connections_page = (ROOT / 'apps/web/app/pessoa/[slug]/conexoes/page.tsx').read_text(encoding='utf-8')
     contest_page = (ROOT / 'apps/web/app/pessoa/[slug]/contestar/page.tsx').read_text(encoding='utf-8')
@@ -176,6 +177,7 @@ def check_frontend_contracts() -> None:
     ok('api.admin.bootstrap_label_promotes', 'label_bootstrap_group' in admin_routes and 'promote_face_reference' in admin_routes and 'APPROVED_MANUAL' in admin_routes, 'nomear grupo aprova e promove referência')
     ok('api.admin.bootstrap_assign_face', 'assign_bootstrap_face' in admin_routes and '/bootstrap-runs/{run_id}/faces/{face_id}/assign' in admin_routes, 'bootstrap tem endpoint para atribuir face individual')
     ok('api.admin.bootstrap_ignore_image', 'ignore_bootstrap_image' in admin_routes and '/bootstrap-runs/{run_id}/article-images/{image_id}/ignore' in admin_routes and 'image.status = "IGNORED"' in admin_routes, 'bootstrap tem endpoint para ignorar imagem inteira')
+    ok('api.admin.article_management', 'list_admin_articles' in admin_routes and 'update_admin_article' in admin_routes and 'delete_admin_article' in admin_routes and '_delete_article_tree' in admin_routes, 'admin lista, corrige e apaga matérias com vínculos')
 
 
 def check_extension_contracts() -> None:
@@ -231,7 +233,7 @@ def check_extension_contracts() -> None:
     ok('article_discovery.allowlist', 'descoberta bloqueada' in extension_routes and '_is_allowed' in extension_routes, 'descoberta respeita allowlist')
     ok('article_discovery.heuristics', 'BLOCKED_IMAGE_HINTS' in discovery_service and 'ARTICLE_IMAGE_HINTS' in discovery_service, 'serviço filtra logos e prioriza imagens jornalísticas')
     ok('article_discovery.browser_optional', 'discover_article_images_browser' in discovery_service and 'playwright.sync_api' in discovery_service, 'serviço suporta renderização opcional com navegador')
-    ok('web.article_url_input', '/extension/discover-article-images' in web_home and 'isLikelyImageUrl' in web_home, 'bancada web aceita URL de matéria automaticamente')
+    ok('web.article_url_input', '/extension/discover-article-images' in web_home and 'analyzeArticleUrl' in web_home and 'discoverFromArticleUrl' in web_home, 'bancada web aceita URL de matéria automaticamente')
     ok('article_discovery.small_images', 'article_discovery_min_image_dimension' in api_config and 'min_dimension' in discovery_service and 'small_image' in discovery_service, 'crawler ignora thumbnails pequenas com limiar configurável')
     ok('article_discovery.image_variant_dedupe', '_variant_key' in discovery_service and '_prefer_image_variant' in discovery_service, 'crawler prefere maior variante da mesma imagem')
     ok('article_discovery.ignored_debug', 'ignored_images' in schemas and 'payload.debug' in extension_routes, 'API retorna imagens ignoradas só em debug')
