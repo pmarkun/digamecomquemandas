@@ -305,6 +305,8 @@ function cropStyle(face: BootstrapFace, image: BootstrapImage): CSSProperties {
 export default function BootstrapAdminPage() {
   const peopleTimer = useRef<number | null>(null);
   const [token, setToken] = useState('');
+  const [email, setEmail] = useState('admin@example.com');
+  const [password, setPassword] = useState('admin');
   const [logged, setLogged] = useState(false);
   const [limit, setLimit] = useState(10);
   const [renderBrowser, setRenderBrowser] = useState(true);
@@ -351,9 +353,29 @@ export default function BootstrapAdminPage() {
     if (!stored) return;
     setToken(stored);
     setLogged(true);
-    void loadRuns(stored);
+    loadRuns(stored).catch(() => {
+      setLogged(false);
+      setFeedback('Sessão admin expirada. Faça login novamente.');
+      window.localStorage.removeItem('digaMeAdminToken');
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const login = async (event: FormEvent) => {
+    event.preventDefault();
+    setFeedback('');
+    try {
+      const out = await api.post<{ token: string }>('/admin/login', { email, password });
+      setToken(out.token);
+      window.localStorage.setItem('digaMeAdminToken', out.token);
+      setLogged(true);
+      setFeedback('Login ok.');
+      await loadRuns(out.token);
+    } catch (_error: unknown) {
+      setLogged(false);
+      setFeedback('Falha no login.');
+    }
+  };
 
   const loadRuns = async (authToken = token) => {
     const rows = await api.get<Array<{ id: string; status: string; created_at: string }>>('/admin/bootstrap-runs', headersFor(authToken));
@@ -558,7 +580,13 @@ export default function BootstrapAdminPage() {
 
         {!logged && (
           <section className="panel">
-            <p>Faça login no admin principal antes de abrir esta bancada.</p>
+            <form className="login-strip" onSubmit={login}>
+              <input className="input" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="email" autoComplete="username" />
+              <input className="input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="senha" autoComplete="current-password" />
+              <button className="button" type="submit">Entrar</button>
+            </form>
+            <p className="muted">A bancada usa a mesma sessão do admin, mas no mobile ela também aceita login direto.</p>
+            {feedback && <p className="feedback">{feedback}</p>}
           </section>
         )}
 

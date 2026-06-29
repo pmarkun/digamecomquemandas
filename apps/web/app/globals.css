@@ -153,6 +153,11 @@ button {
   flex-wrap: wrap;
 }
 
+.login-strip .input,
+.toolbar .input {
+  min-width: 0;
+}
+
 .input {
   border: 1px solid #2b2b2b;
   background: #fffaf0;
@@ -1589,6 +1594,12 @@ button {
     flex-direction: column;
   }
 
+  .toolbar.split > *,
+  .bootstrap-face-body .toolbar,
+  .bootstrap-face-body .toolbar .input {
+    width: 100%;
+  }
+
   .review-card-media {
     border-right: 0;
     border-bottom: 1px solid #2b2b2b;
@@ -1602,5 +1613,61 @@ button {
 
   .image-modal-wrap img {
     max-height: 58vh;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 0.85rem 1rem;
+  }
+
+  .navline {
+    width: 100%;
+  }
+
+  .page {
+    width: min(100% - 1rem, 1180px);
+    padding: 1.35rem 0 3rem;
+  }
+
+  .panel,
+  .bootstrap-face-review,
+  .bootstrap-group {
+    padding: 0.75rem;
+  }
+
+  .admin-title {
+    font-size: clamp(1.8rem, 10vw, 2.6rem);
+  }
+
+  .login-strip {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .login-strip .input,
+  .login-strip .button,
+  .toolbar .input,
+  .toolbar .button,
+  .toolbar .button.secondary,
+  .toolbar select {
+    width: 100%;
+  }
+
+  .bootstrap-review-nav {
+    justify-content: space-between;
+  }
+
+  .bootstrap-image-preview img {
+    max-height: 260px;
+  }
+
+  .bootstrap-face {
+    height: 80px;
+    width: 80px;
   }
 }
