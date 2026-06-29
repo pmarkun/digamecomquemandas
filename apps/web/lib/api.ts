@@ -1,8 +1,14 @@
-const API_BASE = process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+function apiBase() {
+  if (typeof window !== 'undefined') {
+    return '/api/backend';
+  }
+  const publicBase = process.env.NEXT_PUBLIC_API_BASE_URL;
+  return process.env.API_BASE_URL || publicBase || 'http://localhost:8000/api/v1';
+}
 
 export const api = {
   async get<T>(path: string, headers: Record<string, string> = {}): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(`${apiBase()}${path}`, {
       headers: {
         ...headers,
       },
@@ -19,7 +25,7 @@ export const api = {
     body: unknown,
     headers: Record<string, string> = {},
   ): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(`${apiBase()}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
