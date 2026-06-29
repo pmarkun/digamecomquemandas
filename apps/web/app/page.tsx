@@ -266,13 +266,17 @@ export default function HomePage() {
     const article = params.get('article');
     if (article) {
       setArticleUrl(article);
+      setInputUrl(article);
     }
     if (url) {
       setInputUrl(url);
       setSubmittedUrl(url);
       setSubmittedSourceUrl(url);
       setDetectorStatus('Carregando imagem...');
+    } else if (article) {
+      void discoverFromArticleUrl(article);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -348,6 +352,11 @@ export default function HomePage() {
   };
 
   const discoverFromArticleUrl = async (url: string, debug = debugEnabled) => {
+    const next = new URL(window.location.href);
+    next.searchParams.delete('url');
+    next.searchParams.set('article', url);
+    window.history.replaceState({}, '', next);
+
     setLoading(true);
     setFeedback('');
     setResult(null);

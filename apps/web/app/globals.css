@@ -1404,6 +1404,215 @@ button {
   margin: 0;
 }
 
+.article-public-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.article-public-hero {
+  align-items: flex-end;
+  border-bottom: 2px solid #191919;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 2rem 0 1.25rem;
+}
+
+.article-public-hero h1 {
+  max-width: 980px;
+}
+
+.article-public-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.article-public-meta span {
+  border: 1px solid rgba(25, 25, 25, 0.28);
+  background: rgba(255, 250, 240, 0.75);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  padding: 0.22rem 0.45rem;
+}
+
+.article-public-layout {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+}
+
+.article-gallery-panel,
+.article-people-panel,
+.article-empty {
+  background: rgba(255, 250, 240, 0.72);
+  border: 1px solid #2b2b2b;
+}
+
+.article-gallery-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.article-main-image {
+  background: #191919;
+  display: grid;
+  min-height: 320px;
+  overflow: hidden;
+  place-items: center;
+  position: relative;
+}
+
+.article-main-image img {
+  display: block;
+  max-height: 72vh;
+  object-fit: contain;
+  width: 100%;
+}
+
+.article-image-placeholder {
+  align-items: center;
+  aspect-ratio: 16 / 10;
+  background: #eadcc7;
+  color: #555;
+  display: flex;
+  justify-content: center;
+  min-height: 260px;
+  padding: 1rem;
+  text-align: center;
+  width: 100%;
+}
+
+.article-face-marker {
+  align-items: flex-end;
+  background: rgba(39, 93, 173, 0.08);
+  border: 2px solid #f7f2e8;
+  color: #191919;
+  display: flex;
+  justify-content: center;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 0;
+  position: absolute;
+  text-decoration: none;
+}
+
+.article-face-marker.active,
+.article-face-marker:focus-visible {
+  background: rgba(39, 93, 173, 0.2);
+  border-color: #275dad;
+  outline: 2px solid #f7f2e8;
+}
+
+.article-face-marker span {
+  background: #f7f2e8;
+  border-top: 1px solid #191919;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+  padding: 0.15rem 0.3rem;
+  width: 100%;
+}
+
+.article-thumb-strip {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+}
+
+.article-thumb-strip button {
+  background: #fffaf0;
+  border: 1px solid rgba(25, 25, 25, 0.28);
+  color: #191919;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  text-align: left;
+}
+
+.article-thumb-strip button.active {
+  border-color: #191919;
+  box-shadow: inset 0 0 0 1px #191919;
+}
+
+.article-thumb-strip img,
+.article-thumb-fallback {
+  aspect-ratio: 4 / 3;
+  background: #eadcc7;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.article-thumb-strip small {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.article-people-panel,
+.article-empty {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.article-people-panel {
+  position: sticky;
+  top: 5rem;
+}
+
+.article-people-panel h2 {
+  margin: 0.25rem 0 0;
+}
+
+.article-person-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.article-person-card {
+  border: 1px solid rgba(25, 25, 25, 0.24);
+  background: rgba(247, 242, 232, 0.62);
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.65rem;
+}
+
+.article-person-card.active {
+  border-color: #275dad;
+  box-shadow: inset 0 0 0 1px #275dad;
+}
+
+.article-person-card button {
+  background: transparent;
+  border: 0;
+  color: #191919;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0;
+  text-align: left;
+}
+
+.article-person-card button span {
+  color: #555;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.article-person-card div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
 .connection-card h2 {
   font-size: 1.35rem;
   margin-bottom: 0.2rem;
@@ -1612,6 +1821,8 @@ button {
   .image-modal-layout,
   .profile-summary,
   .contest-layout,
+  .article-public-hero,
+  .article-public-layout,
   .review-url-form,
   .review-workbench {
     grid-template-columns: 1fr;
@@ -1648,6 +1859,10 @@ button {
 
   .influence-side-panel {
     max-height: none;
+    position: static;
+  }
+
+  .article-people-panel {
     position: static;
   }
 

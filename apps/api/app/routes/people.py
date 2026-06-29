@@ -451,18 +451,22 @@ def get_article(article_id: str, session: Session = Depends(get_session)):
             ).all()
             match_payload = []
             for match in matches:
+                if match.status not in PUBLIC_MATCH_STATUSES:
+                    continue
                 person = session.get(Person, match.person_id)
-                if not person:
+                if not person or not person.is_public_figure or person.status != "ACTIVE":
                     continue
                 match_payload.append(
                     {
                         "person_id": str(person.id),
-                        "name": person.name,
+                        "name": person.display_name or person.name,
                         "slug": person.slug,
                         "score": match.score,
                         "status": match.status,
                     }
                 )
+            if not match_payload:
+                continue
             face_payload.append(
                 {
                     "face_id": str(face.id),

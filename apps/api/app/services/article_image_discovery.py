@@ -412,7 +412,21 @@ def discover_article_images_browser(page_url: str, max_images: int) -> Discovery
     images = []
     ignored_images = []
     for item in payload.get("images", []):
-        image_url = urljoin(payload.get("pageUrl") or page_url, item.get("image_url") or "")
+        raw_image_url = (item.get("image_url") or "").strip()
+        if not raw_image_url:
+            ignored_images.append(
+                IgnoredImage(
+                    image_url=payload.get("pageUrl") or page_url,
+                    width=_as_int(item.get("width")),
+                    height=_as_int(item.get("height")),
+                    alt=item.get("alt") or None,
+                    source="browser",
+                    score=0,
+                    reason="empty_src",
+                )
+            )
+            continue
+        image_url = urljoin(payload.get("pageUrl") or page_url, raw_image_url)
         evaluation = evaluate_image_candidate(
             image_url,
             _as_int(item.get("width")),
