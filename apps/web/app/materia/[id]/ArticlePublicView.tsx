@@ -101,11 +101,20 @@ export default function ArticlePublicView({ article }: { article: PublicArticle 
     setActiveFaceId(appearance.face.face_id);
   };
 
+  const goBack = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    window.location.assign('/');
+  };
+
   return (
     <main className="shell">
       <header className="topbar">
         <Link className="brand" href="/">Diga-me</Link>
         <nav className="navline">
+          <button className="link-button" onClick={goBack} type="button">Voltar</button>
           <Link href="/">Home</Link>
           <a href={article.url} target="_blank" rel="noreferrer">Matéria original</a>
         </nav>

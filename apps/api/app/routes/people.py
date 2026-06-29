@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
+from typing import Final
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
 from ..db import get_session
@@ -10,6 +12,7 @@ from ..services.audit import write_action
 router = APIRouter()
 
 PUBLIC_MATCH_STATUSES = {"APPROVED", "APPROVED_MANUAL", "AUTO_APPROVED"}
+TRACKING_QUERY_KEYS: Final = {"fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
 
 
 def _as_uuid(value: str) -> UUID:
@@ -17,6 +20,18 @@ def _as_uuid(value: str) -> UUID:
         return UUID(value)
     except ValueError:
         raise HTTPException(status_code=400, detail="UUID inválido") from None
+
+
+def _normalize_article_url(url: str) -> str:
+    parsed = urlparse(url)
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in TRACKING_QUERY_KEYS and not key.lower().startswith("utm_")
+        ]
+    )
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/") or "/", "", query, ""))
 
 
 def _to_people_out(row: Person) -> dict:
@@ -430,6 +445,28 @@ def recent_articles(limit: int = Query(default=12, ge=1, le=50), session: Sessio
         if len(out) >= limit:
             break
     return out
+
+
+@router.get("/articles/resolve")
+def resolve_article(url: str = Query(..., min_length=1), session: Session = Depends(get_session)):
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError
+        normalized_url = _normalize_article_url(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="URL inválida") from None
+
+    for article in session.exec(select(Article)).all():
+        if article.url and _normalize_article_url(article.url) == normalized_url:
+            return {
+                "found": True,
+                "article_id": str(article.id),
+                "url": article.url,
+                "domain": article.domain,
+                "title": article.title,
+            }
+    return {"found": False}
 
 
 @router.get("/articles/{article_id}")

@@ -82,8 +82,14 @@ type RecentArticle = {
   }>;
 };
 
-const DEFAULT_IMAGE_URL =
-  'https://f.i.uol.com.br/fotografia/2026/06/25/17824066766a3d5e1405be2_1782406676_3x2_rt.jpg';
+type ArticleResolveResponse = {
+  found: boolean;
+  article_id?: string;
+  url?: string;
+  domain?: string;
+  title?: string | null;
+};
+
 const DEFAULT_ARTICLE_URL =
   'https://www1.folha.uol.com.br/poder/2026/06/haddad-tera-franca-como-vice-na-disputa-pelo-governo-de-sp-com-tebet-e-marina-para-o-senado.shtml';
 
@@ -97,16 +103,6 @@ function withProbeNonce(url: string) {
 
 function proxiedImageUrl(url: string) {
   return `/api/image-proxy?url=${encodeURIComponent(url)}`;
-}
-
-function isLikelyImageUrl(url: string) {
-  try {
-    const parsed = new URL(url);
-    const pathname = parsed.pathname.toLowerCase();
-    return /\.(avif|bmp|gif|jpe?g|png|webp)(?:$|\?)/.test(pathname);
-  } catch (_error: unknown) {
-    return false;
-  }
 }
 
 function bboxStyle(face: Face, naturalSize: { width: number; height: number }) {
@@ -231,7 +227,7 @@ async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFac
 export default function HomePage() {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const peopleSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [inputUrl, setInputUrl] = useState(DEFAULT_IMAGE_URL);
+  const [inputUrl, setInputUrl] = useState(DEFAULT_ARTICLE_URL);
   const [submittedUrl, setSubmittedUrl] = useState('');
   const [submittedSourceUrl, setSubmittedSourceUrl] = useState('');
   const [articleUrl, setArticleUrl] = useState(DEFAULT_ARTICLE_URL);
@@ -246,7 +242,7 @@ export default function HomePage() {
   const [peopleOptions, setPeopleOptions] = useState<Record<string, PersonOption[]>>({});
   const [suggestionFeedback, setSuggestionFeedback] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState('');
-  const [detectorStatus, setDetectorStatus] = useState('Cole uma URL de imagem ou matéria para começar.');
+  const [detectorStatus, setDetectorStatus] = useState('Cole uma URL de matéria para começar.');
   const [loading, setLoading] = useState(false);
   const [recentArticles, setRecentArticles] = useState<RecentArticle[]>([]);
 
@@ -274,7 +270,7 @@ export default function HomePage() {
       setSubmittedSourceUrl(url);
       setDetectorStatus('Carregando imagem...');
     } else if (article) {
-      void discoverFromArticleUrl(article);
+      void analyzeArticleUrl(article);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -393,24 +389,47 @@ export default function HomePage() {
     }
   };
 
+  const analyzeArticleUrl = async (url: string) => {
+    let normalizedUrl: string;
+    try {
+      normalizedUrl = new URL(url).toString();
+    } catch (_error: unknown) {
+      setFeedback('Informe uma URL de matéria válida.');
+      return;
+    }
+
+    setLoading(true);
+    setFeedback('');
+    setSubmittedSourceUrl(normalizedUrl);
+    setDiscoveredImages([]);
+    setIgnoredImages([]);
+    setArticleTitle('');
+    setDetectorStatus('Verificando se a matéria já foi analisada...');
+
+    try {
+      const existing = await api.get<ArticleResolveResponse>(`/articles/resolve?url=${encodeURIComponent(normalizedUrl)}`);
+      if (existing.found && existing.article_id) {
+        window.location.assign(`/materia/${existing.article_id}`);
+        return;
+      }
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : 'Não foi possível verificar a matéria.');
+      setLoading(false);
+      return;
+    }
+
+    await discoverFromArticleUrl(normalizedUrl);
+  };
+
   const submitUrl = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = inputUrl.trim();
     if (!trimmed) {
-      setFeedback('Informe uma URL de imagem ou matéria.');
+      setFeedback('Informe uma URL de matéria.');
       return;
     }
 
-    setSubmittedSourceUrl(trimmed);
-    setDiscoveredImages([]);
-    setIgnoredImages([]);
-    setArticleTitle('');
-    if (!isLikelyImageUrl(trimmed)) {
-      await discoverFromArticleUrl(trimmed);
-      return;
-    }
-
-    openImageUrl(trimmed);
+    await analyzeArticleUrl(trimmed);
   };
 
   const suggestFace = async (event: FormEvent, face: Face) => {
@@ -471,11 +490,20 @@ export default function HomePage() {
     setPeopleOptions((current) => ({ ...current, [face.face_id]: [] }));
   };
 
+  const goBack = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    window.location.assign('/');
+  };
+
   return (
     <main className="review-shell">
       <header className="review-topbar">
         <Link className="brand" href="/">Diga-me</Link>
         <nav className="navline">
+          <button className="link-button" onClick={goBack} type="button">Voltar</button>
           <Link href="/admin">Admin</Link>
           <a href="chrome://extensions">Extensão</a>
         </nav>
@@ -483,19 +511,19 @@ export default function HomePage() {
 
       <section className={`review-url-panel ${submittedUrl ? 'compact' : ''}`}>
         <p className="kicker">Bancada de marcação</p>
-        <h1>Marcar e revisar faces em uma imagem ou matéria</h1>
+        <h1>Marcar e revisar faces em uma matéria</h1>
         <form className="review-url-form" onSubmit={submitUrl}>
           <label>
-            URL da imagem ou matéria
+            URL da matéria
             <input
               className="input"
               value={inputUrl}
               onChange={(event) => setInputUrl(event.target.value)}
-              placeholder="https://..."
+              placeholder="https://jornal.example/materia"
             />
           </label>
           <button className="button" type="submit" disabled={loading}>
-            {loading ? 'Analisando...' : 'Analisar URL'}
+            {loading ? 'Analisando...' : 'Analisar matéria'}
           </button>
         </form>
         <label className="debug-toggle">
@@ -504,7 +532,7 @@ export default function HomePage() {
             onChange={(event) => {
               const enabled = event.target.checked;
               setDebugEnabled(enabled);
-              if (enabled && submittedSourceUrl && !isLikelyImageUrl(submittedSourceUrl)) {
+              if (enabled && submittedSourceUrl) {
                 void discoverFromArticleUrl(submittedSourceUrl, true);
               }
             }}
@@ -521,7 +549,7 @@ export default function HomePage() {
             placeholder="URL da matéria permitida"
           />
         </details>
-        <p className="muted">A URL da imagem fica em <code>?url=</code>; a matéria fica em <code>?article=</code>.</p>
+        <p className="muted">Se a matéria já tiver análise pública, você será levado direto para a página dela.</p>
       </section>
 
       {recentArticles.length > 0 ? (

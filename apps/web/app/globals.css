@@ -68,6 +68,17 @@ button {
   text-transform: uppercase;
 }
 
+.link-button {
+  background: transparent;
+  border: 0;
+  color: #275DAD;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-transform: inherit;
+}
+
 .page {
   width: min(1180px, calc(100% - 2rem));
   margin: 0 auto;
