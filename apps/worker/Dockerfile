@@ -4,11 +4,9 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv
 
-COPY apps/worker/pyproject.toml apps/worker/
-RUN cd apps/worker && uv sync --no-cache
+COPY pyproject.toml ./
+RUN uv sync --no-cache && uv run playwright install --with-deps chromium
 
-COPY . .
-
-WORKDIR /app/apps/worker
+COPY app ./app
 
 CMD ["uv", "run", "python", "-m", "app.worker"]

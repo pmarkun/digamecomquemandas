@@ -53,18 +53,22 @@ services:
 
   worker:
     build:
-      context: ../..
-      dockerfile: apps/worker/Dockerfile
+      context: ../../apps/worker
+      dockerfile: Dockerfile
     container_name: diga-me-worker
     env_file:
       - ../../.env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/qtnf
-      REDIS_URL: redis://redis:6379/0
-      WORKER_LOOP: "1"
+      API_BASE_URL: http://api:8000/api/v1
+      WEB_BASE_URL: http://web:3000
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: admin
+      NEWS_CRON_INTERVAL_SECONDS: "3600"
+      NEWS_CRON_LIMIT_PER_SOURCE: "5"
+      NEWS_CRON_MAX_IMAGES_PER_ARTICLE: "4"
     depends_on:
       - api
-      - redis
+      - web
 
 volumes:
   pgdata:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from uuid import UUID
 
@@ -376,6 +376,60 @@ def contest(slug: str, payload: ContestRequest, session: Session = Depends(get_s
     )
     session.commit()
     return {"ok": True, "id": str(req.id)}
+
+
+@router.get("/articles/recent")
+def recent_articles(limit: int = Query(default=12, ge=1, le=50), session: Session = Depends(get_session)):
+    rows = session.exec(
+        select(Article, ArticleImage, FaceMatch, Person)
+        .join(ArticleImage, ArticleImage.article_id == Article.id)
+        .join(DetectedFace, DetectedFace.article_image_id == ArticleImage.id)
+        .join(FaceMatch, FaceMatch.detected_face_id == DetectedFace.id)
+        .join(Person, Person.id == FaceMatch.person_id)
+        .where(FaceMatch.status.in_(PUBLIC_MATCH_STATUSES))
+        .where(Person.is_public_figure == True)  # noqa: E712
+        .where(Person.status == "ACTIVE")
+        .order_by(Article.captured_at.desc(), FaceMatch.score.desc())
+    ).all()
+
+    by_article: dict[str, dict] = {}
+    for article, image, match, person in rows:
+        article_key = str(article.id)
+        item = by_article.setdefault(
+            article_key,
+            {
+                "article_id": article_key,
+                "title": article.title,
+                "url": article.url,
+                "domain": article.domain,
+                "captured_at": article.captured_at,
+                "thumbnail_url": image.image_url,
+                "people": [],
+                "_people": set(),
+            },
+        )
+        if not item["thumbnail_url"] and image.image_url:
+            item["thumbnail_url"] = image.image_url
+        person_key = str(person.id)
+        if person_key not in item["_people"]:
+            item["_people"].add(person_key)
+            item["people"].append(
+                {
+                    "person_id": person_key,
+                    "name": person.display_name or person.name,
+                    "slug": person.slug,
+                    "score": round(match.score, 4),
+                    "status": match.status,
+                }
+            )
+
+    out = []
+    for item in by_article.values():
+        item.pop("_people", None)
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return out
 
 
 @router.get("/articles/{article_id}")

@@ -66,6 +66,22 @@ type DiscoverResponse = {
   warnings: string[];
 };
 
+type RecentArticle = {
+  article_id: string;
+  title?: string | null;
+  url: string;
+  domain: string;
+  captured_at?: string | null;
+  thumbnail_url?: string | null;
+  people: Array<{
+    person_id: string;
+    name: string;
+    slug: string;
+    score: number;
+    status: string;
+  }>;
+};
+
 const DEFAULT_IMAGE_URL =
   'https://f.i.uol.com.br/fotografia/2026/06/25/17824066766a3d5e1405be2_1782406676_3x2_rt.jpg';
 const DEFAULT_ARTICLE_URL =
@@ -232,6 +248,7 @@ export default function HomePage() {
   const [feedback, setFeedback] = useState('');
   const [detectorStatus, setDetectorStatus] = useState('Cole uma URL de imagem ou matéria para começar.');
   const [loading, setLoading] = useState(false);
+  const [recentArticles, setRecentArticles] = useState<RecentArticle[]>([]);
 
   const faces = result?.results[0]?.faces || [];
   const selectedFace = faces.find((face) => face.face_id === selectedFaceId) || faces[0] || null;
@@ -256,6 +273,12 @@ export default function HomePage() {
       setSubmittedSourceUrl(url);
       setDetectorStatus('Carregando imagem...');
     }
+  }, []);
+
+  useEffect(() => {
+    api.get<RecentArticle[]>('/articles/recent?limit=8')
+      .then(setRecentArticles)
+      .catch(() => setRecentArticles([]));
   }, []);
 
   const analyzeLoadedImage = async () => {
@@ -491,6 +514,37 @@ export default function HomePage() {
         </details>
         <p className="muted">A URL da imagem fica em <code>?url=</code>; a matéria fica em <code>?article=</code>.</p>
       </section>
+
+      {recentArticles.length > 0 ? (
+        <section className="recent-articles-band" aria-label="Últimas notícias processadas">
+          <div className="recent-articles-head">
+            <div>
+              <p className="eyebrow">Últimas notícias processadas</p>
+              <h2>Quem apareceu nas matérias recentes</h2>
+            </div>
+          </div>
+          <div className="recent-article-grid">
+            {recentArticles.map((article) => (
+              <Link className="recent-article-card" href={`/materia/${article.article_id}`} key={article.article_id}>
+                {article.thumbnail_url ? (
+                  <img src={proxiedImageUrl(article.thumbnail_url)} alt="" />
+                ) : (
+                  <span className="recent-thumb-placeholder" />
+                )}
+                <div>
+                  <strong>{article.title || article.url}</strong>
+                  <p>{article.domain} · {article.captured_at ? new Date(article.captured_at).toLocaleString('pt-BR') : 'sem data'}</p>
+                  <div className="recent-people-row">
+                    {article.people.slice(0, 4).map((person) => (
+                      <span key={`${article.article_id}-${person.person_id}`}>{person.name}</span>
+                    ))}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {submittedUrl ? (
         <section className="review-workbench">

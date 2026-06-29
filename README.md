@@ -55,12 +55,13 @@ Serviços esperados:
 
 ### Deploy Railway
 
-O deploy recomendado no Railway mantém **dois serviços** e um volume persistente:
+O deploy recomendado no Railway mantém **três serviços** e um volume persistente:
 
 - `api`: FastAPI, SQLite em volume Railway e Playwright/Chromium para renderizar matérias quando ativado.
 - `web`: Next.js servido separadamente, apontando para a API pública.
+- `worker`: cron horário que cria runs de notícias novas e processa faces pelo `face-api.js` em Chromium headless.
 - Volume no serviço `api`: montar em `/data`.
-- Redis não é obrigatório no fluxo atual; o worker usa arquivo/local demo e pode ficar fora do deploy inicial.
+- Redis não é obrigatório no fluxo atual.
 
 Variáveis sugeridas no serviço `api`:
 
@@ -90,11 +91,25 @@ API_BASE_URL=https://SEU-API.up.railway.app/api/v1
 NEXT_PUBLIC_BOOTSTRAP_MIN_IMAGE_DIMENSION=300
 ```
 
+Variáveis sugeridas no serviço `worker`:
+
+```env
+API_BASE_URL=https://SEU-API.up.railway.app/api/v1
+WEB_BASE_URL=https://SEU-WEB.up.railway.app
+ADMIN_EMAIL=...
+ADMIN_PASSWORD=...
+NEWS_CRON_INTERVAL_SECONDS=3600
+NEWS_CRON_LIMIT_PER_SOURCE=5
+NEWS_CRON_MAX_IMAGES_PER_ARTICLE=4
+NEWS_CRON_RENDER_BROWSER=true
+```
+
 Passos via Railway CLI, depois de `railway login` e `railway link`:
 
 ```bash
 railway add --service api
 railway add --service web
+railway add --service worker
 railway volume --service api add --mount-path /data
 railway variable set DATABASE_URL=sqlite:////data/diga-me.sqlite3 --service api
 railway variable set ALLOW_SQLITE_FALLBACK=false --service api
@@ -104,14 +119,16 @@ railway variable set NEXT_PUBLIC_API_BASE_URL=https://SEU-API.up.railway.app/api
 railway variable set API_BASE_URL=https://SEU-API.up.railway.app/api/v1 --service web
 railway up ./apps/api --path-as-root --service api --detach
 railway up ./apps/web --path-as-root --service web --detach
+railway up ./apps/worker --path-as-root --service worker --detach
 ```
 
 No deploy via CLI, cada serviço usa o próprio diretório como contexto e encontra o Dockerfile local:
 
 - `api`: `apps/api/Dockerfile`
 - `web`: `apps/web/Dockerfile`
+- `worker`: `apps/worker/Dockerfile`
 
-Como alternativa, conecte os dois serviços ao repositório GitHub e defina o Dockerfile de cada serviço pelo dashboard. O serviço `api` deve ter apenas uma réplica quando estiver usando SQLite em volume.
+Como alternativa, conecte os três serviços ao repositório GitHub e defina o Dockerfile de cada serviço pelo dashboard. O serviço `api` deve ter apenas uma réplica quando estiver usando SQLite em volume.
 
 ### Banco e seed
 
@@ -151,6 +168,7 @@ make seed
 - Estrutura do monorepo conforme especificado.
 - API com fluxo ponta a ponta de análise de página, resultados e contestação.
 - Web pública com páginas: home, perfil, conexões, matéria e admin.
+- Worker horário para descobrir notícias novas, processar faces via web headless e alimentar a home.
 - Seed inicial (`infra/seed/people.json`) com 10 pessoas e 2 imagens públicas.
 - Extensão V3 mínima com allowlist, análise remota, sidebar incremental de imagens, marcação de pessoa não identificada e sugestão manual.
 - Bancada web aceita URL direta de imagem ou URL de matéria permitida; a API descobre imagens prováveis no artigo com heurísticas anti-logo e pode usar navegador renderizado quando configurado.

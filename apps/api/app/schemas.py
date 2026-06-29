@@ -216,6 +216,7 @@ class SuggestionCreate(BaseModel):
 class BootstrapRunCreate(BaseModel):
     limit_per_source: int = Field(default=10, ge=1, le=50)
     render_browser: bool = True
+    skip_existing: bool = False
 
 
 class BootstrapRunArticleAttach(BaseModel):

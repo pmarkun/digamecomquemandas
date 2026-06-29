@@ -5,6 +5,7 @@ from hashlib import sha256
 import re
 import unicodedata
 from typing import Final
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 from sqlmodel import Session, select
 
@@ -58,6 +59,7 @@ ALLOWED_SUGGESTION_STATUS: Final = {
 }
 BOOTSTRAP_GROUP_THRESHOLD: Final = 0.88
 ACTIVE_MATCH_STATUS: Final = {"AUTO", "AUTO_APPROVED", "APPROVED", "APPROVED_MANUAL"}
+TRACKING_QUERY_KEYS: Final = {"fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
 
 
 def _require_admin(
@@ -78,6 +80,24 @@ def _as_uuid(value: str) -> UUID:
         return UUID(value)
     except ValueError:
         raise HTTPException(status_code=400, detail="UUID inválido") from None
+
+
+def _normalize_article_url(url: str) -> str:
+    parsed = urlparse(url)
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in TRACKING_QUERY_KEYS and not key.lower().startswith("utm_")
+        ]
+    )
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/") or "/", "", query, ""))
+
+
+def _known_article_urls(session: Session) -> set[str]:
+    urls = {url for url in session.exec(select(Article.url)).all() if url}
+    urls.update(url for url in session.exec(select(BootstrapRunArticle.article_url)).all() if url)
+    return {_normalize_article_url(url) for url in urls}
 
 
 @router.post("/login", response_model=LoginOut)
@@ -103,10 +123,16 @@ def create_bootstrap_run(
     session.flush()
 
     warnings: list[str] = []
+    known_urls = _known_article_urls(session) if payload.skip_existing else set()
+    skipped = 0
     discovered = discover_politics_articles(payload.limit_per_source, payload.render_browser)
     for result in discovered:
         warnings.extend(f"{result.source.source}: {warning}" for warning in result.warnings)
         for article in result.articles:
+            if payload.skip_existing and _normalize_article_url(article.article_url) in known_urls:
+                skipped += 1
+                continue
+            known_urls.add(_normalize_article_url(article.article_url))
             session.add(
                 BootstrapRunArticle(
                     run_id=run.id,
@@ -119,6 +145,8 @@ def create_bootstrap_run(
                 )
             )
 
+    if skipped:
+        warnings.append(f"{skipped} matéria(s) já conhecida(s) ignorada(s).")
     run.status = "READY"
     run.warnings = warnings
     run.updated_at = datetime.now(timezone.utc)
@@ -130,7 +158,11 @@ def create_bootstrap_run(
         action="create_bootstrap_run",
         entity_type="bootstrap_run",
         entity_id=run.id,
-        metadata={"limit_per_source": payload.limit_per_source, "render_browser": payload.render_browser},
+        metadata={
+            "limit_per_source": payload.limit_per_source,
+            "render_browser": payload.render_browser,
+            "skip_existing": payload.skip_existing,
+        },
     )
     session.commit()
     session.refresh(run)
