@@ -68,6 +68,7 @@ Variáveis sugeridas no serviço `api`:
 DATABASE_URL=sqlite:////data/diga-me.sqlite3
 ALLOW_SQLITE_FALLBACK=false
 SEED_ON_STARTUP=true
+SEED_PEOPLE_PATH=
 ARTICLE_DISCOVERY_BROWSER_ENABLED=true
 ARTICLE_DISCOVERY_MIN_IMAGE_DIMENSION=300
 WEB_BASE_URL=https://SEU-WEB.up.railway.app
@@ -94,16 +95,18 @@ Passos via Railway CLI, depois de `railway login` e `railway link`:
 ```bash
 railway add --service api
 railway add --service web
-railway volume add --service api --mount-path /data
+railway volume --service api add --mount-path /data
 railway variable set DATABASE_URL=sqlite:////data/diga-me.sqlite3 --service api
 railway variable set ALLOW_SQLITE_FALLBACK=false --service api
 railway variable set SEED_ON_STARTUP=true --service api
 railway variable set ARTICLE_DISCOVERY_BROWSER_ENABLED=true --service api
 railway variable set NEXT_PUBLIC_API_BASE_URL=https://SEU-API.up.railway.app/api/v1 --service web
 railway variable set API_BASE_URL=https://SEU-API.up.railway.app/api/v1 --service web
+railway up ./apps/api --path-as-root --service api --detach
+railway up ./apps/web --path-as-root --service web --detach
 ```
 
-No dashboard do Railway, configure cada serviço para usar o respectivo Dockerfile:
+No deploy via CLI, cada serviço usa o próprio diretório como contexto e encontra o Dockerfile local:
 
 - `api`: `apps/api/Dockerfile`
 - `web`: `apps/web/Dockerfile`

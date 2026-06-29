@@ -2,14 +2,11 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/web/package.json apps/web/
-RUN corepack enable && corepack prepare pnpm@11.8.0 --activate && pnpm install --filter ./apps/web
+COPY package.json ./
+RUN npm install
 
-COPY apps/web ./apps/web
-
-WORKDIR /app/apps/web
-RUN pnpm build
+COPY . .
+RUN npm run build
 
 EXPOSE 3000
-CMD ["sh", "-c", "pnpm exec next start -p ${PORT:-3000}"]
+CMD ["sh", "-c", "npx next start -p ${PORT:-3000}"]

@@ -26,7 +26,12 @@ ALLOWED_DOMAINS = [
 
 
 def seed_initial_people() -> None:
-    seed_path = Path(__file__).resolve().parents[3] / "infra" / "seed" / "people.json"
+    settings = get_settings()
+    seed_path = Path(settings.seed_people_path).expanduser() if settings.seed_people_path else None
+    if seed_path is None:
+        repo_seed_path = Path(__file__).resolve().parents[3] / "infra" / "seed" / "people.json"
+        package_seed_path = Path(__file__).resolve().parents[1] / "seed" / "people.json"
+        seed_path = repo_seed_path if repo_seed_path.exists() else package_seed_path
     with open(seed_path, "r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
