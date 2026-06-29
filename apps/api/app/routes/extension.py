@@ -1,4 +1,5 @@
-from urllib.parse import urlparse
+from typing import Final
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 from math import isfinite
 
@@ -41,12 +42,26 @@ from ..schemas import (
 
 router = APIRouter()
 
+TRACKING_QUERY_KEYS: Final = {"diga_probe", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
+
 
 def _as_uuid(value: str) -> UUID:
     try:
         return UUID(value)
     except ValueError:
         raise HTTPException(status_code=400, detail="UUID inválido") from None
+
+
+def _normalize_article_url(url: str) -> str:
+    parsed = urlparse(url)
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in TRACKING_QUERY_KEYS and not key.lower().startswith("utm_")
+        ]
+    )
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/") or "/", "", query, ""))
 
 
 def _ensure_allowed_domain(session: Session, domain: str) -> bool:
@@ -369,15 +384,30 @@ def analyze_page(payload: AnalyzePageRequest, session: Session = Depends(get_ses
             detail="Domínio fora da allowlist; análise bloqueada.",
         )
 
+    normalized_page_url = _normalize_article_url(payload.page_url)
     article = session.exec(select(Article).where(Article.url == payload.page_url)).first()
     if not article:
+        article = next(
+            (
+                item
+                for item in session.exec(select(Article)).all()
+                if item.url and _normalize_article_url(item.url) == normalized_page_url
+            ),
+            None,
+        )
+    if not article:
         article = Article(
-            url=payload.page_url,
-            domain=ensure_domain(payload.page_url),
+            url=normalized_page_url,
+            domain=ensure_domain(normalized_page_url),
             title=payload.title,
         )
         session.add(article)
         session.flush()
+    else:
+        article.url = normalized_page_url
+        if payload.title and (not article.title or article.title == "Teste direto de imagem"):
+            article.title = payload.title
+        session.add(article)
 
     results = []
     person_embeddings = session.exec(select(FaceEmbedding)).all()

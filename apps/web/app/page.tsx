@@ -95,12 +95,6 @@ const DEFAULT_ARTICLE_URL =
 
 let faceModelLoad: Promise<unknown> | null = null;
 
-function withProbeNonce(url: string) {
-  const parsed = new URL(url);
-  parsed.searchParams.set('diga_probe', String(Date.now()));
-  return parsed.toString();
-}
-
 function proxiedImageUrl(url: string) {
   return `/api/image-proxy?url=${encodeURIComponent(url)}`;
 }
@@ -226,6 +220,8 @@ async function detectFacesForImage(image: HTMLImageElement): Promise<DetectedFac
 
 export default function HomePage() {
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const articleUrlRef = useRef(DEFAULT_ARTICLE_URL);
+  const articleTitleRef = useRef('');
   const peopleSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputUrl, setInputUrl] = useState(DEFAULT_ARTICLE_URL);
   const [submittedUrl, setSubmittedUrl] = useState('');
@@ -261,6 +257,7 @@ export default function HomePage() {
     const url = params.get('url');
     const article = params.get('article');
     if (article) {
+      articleUrlRef.current = article;
       setArticleUrl(article);
       setInputUrl(article);
     }
@@ -305,8 +302,8 @@ export default function HomePage() {
       );
 
       const out = await api.post<AnalyzeResponse>('/extension/analyze-page', {
-        page_url: withProbeNonce(articleUrl || DEFAULT_ARTICLE_URL),
-        title: 'Teste direto de imagem',
+        page_url: articleUrlRef.current || submittedSourceUrl || articleUrl || DEFAULT_ARTICLE_URL,
+        title: articleTitleRef.current || articleTitle || 'Matéria analisada',
         images: [
           {
             image_url: submittedUrl,
@@ -337,6 +334,8 @@ export default function HomePage() {
     }
     window.history.replaceState({}, '', next);
 
+    articleUrlRef.current = nextArticleUrl.trim() || articleUrlRef.current;
+    setArticleUrl(articleUrlRef.current);
     setSubmittedUrl(imageUrl);
     setNaturalSize({ width: 0, height: 0 });
     setResult(null);
@@ -368,8 +367,10 @@ export default function HomePage() {
         max_images: 12,
         debug,
       });
+      articleUrlRef.current = discovery.page_url;
+      articleTitleRef.current = discovery.title || '';
       setArticleUrl(discovery.page_url);
-      setArticleTitle(discovery.title || '');
+      setArticleTitle(articleTitleRef.current);
       setDiscoveredImages(discovery.images);
       setIgnoredImages(discovery.ignored_images || []);
       if (discovery.warnings.length > 0) {
@@ -400,6 +401,9 @@ export default function HomePage() {
 
     setLoading(true);
     setFeedback('');
+    articleUrlRef.current = normalizedUrl;
+    articleTitleRef.current = '';
+    setArticleUrl(normalizedUrl);
     setSubmittedSourceUrl(normalizedUrl);
     setDiscoveredImages([]);
     setIgnoredImages([]);
@@ -545,7 +549,10 @@ export default function HomePage() {
           <input
             className="input"
             value={articleUrl}
-            onChange={(event) => setArticleUrl(event.target.value)}
+            onChange={(event) => {
+              articleUrlRef.current = event.target.value;
+              setArticleUrl(event.target.value);
+            }}
             placeholder="URL da matéria permitida"
           />
         </details>
