@@ -12,7 +12,7 @@ from ..services.audit import write_action
 router = APIRouter()
 
 PUBLIC_MATCH_STATUSES = {"APPROVED", "APPROVED_MANUAL", "AUTO_APPROVED"}
-TRACKING_QUERY_KEYS: Final = {"fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
+TRACKING_QUERY_KEYS: Final = {"codex-faceapi", "diga_probe", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
 
 
 def _as_uuid(value: str) -> UUID:

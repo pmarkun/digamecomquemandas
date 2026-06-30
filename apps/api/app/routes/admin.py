@@ -61,7 +61,7 @@ ALLOWED_SUGGESTION_STATUS: Final = {
 }
 BOOTSTRAP_GROUP_THRESHOLD: Final = 0.88
 ACTIVE_MATCH_STATUS: Final = {"AUTO", "AUTO_APPROVED", "APPROVED", "APPROVED_MANUAL"}
-TRACKING_QUERY_KEYS: Final = {"diga_probe", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
+TRACKING_QUERY_KEYS: Final = {"codex-faceapi", "diga_probe", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
 
 
 def _require_admin(

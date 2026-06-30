@@ -42,7 +42,7 @@ from ..schemas import (
 
 router = APIRouter()
 
-TRACKING_QUERY_KEYS: Final = {"diga_probe", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
+TRACKING_QUERY_KEYS: Final = {"codex-faceapi", "diga_probe", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "srsltid"}
 
 
 def _as_uuid(value: str) -> UUID:
