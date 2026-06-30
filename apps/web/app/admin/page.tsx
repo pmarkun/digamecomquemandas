@@ -364,6 +364,19 @@ export default function AdminPage() {
     await loadProtected();
   };
 
+  const mergeArticleDuplicates = async (article: AdminArticle) => {
+    if (!confirm(`Mesclar matérias duplicadas com a mesma URL limpa de "${article.title || article.url}"?`)) {
+      return;
+    }
+    const out = await api.post<{ merged: { removed_articles: number; moved_images: number } }>(
+      `/admin/articles/${article.id}/merge-duplicates`,
+      {},
+      headersFor(),
+    );
+    setFeedback(`Duplicatas mescladas: ${out.merged.removed_articles} matéria(s), ${out.merged.moved_images} imagem(ns).`);
+    await loadProtected();
+  };
+
   const queues: Array<{ key: QueueKey; label: string; count: number }> = [
     { key: 'suggestions', label: showSuggestionHistory ? 'Sugestões' : 'Sugestões pendentes', count: suggestions.length },
     { key: 'matches', label: 'Matches', count: matches.length },
@@ -604,6 +617,7 @@ export default function AdminPage() {
                             </div>
                             <div className="toolbar">
                               <button className="button" type="button" onClick={() => startEditArticle(article)}>Corrigir</button>
+                              <button className="button secondary" type="button" onClick={() => mergeArticleDuplicates(article)}>Mesclar duplicatas</button>
                               <button className="button secondary" type="button" onClick={() => deleteArticle(article)}>Apagar</button>
                             </div>
                           </>

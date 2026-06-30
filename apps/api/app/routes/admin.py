@@ -176,6 +176,44 @@ def _delete_article_tree(session: Session, article: Article) -> dict:
     return deleted
 
 
+def _merge_duplicate_articles(session: Session, target: Article) -> dict:
+    normalized_target = _normalize_article_url(target.url)
+    duplicates = [
+        article
+        for article in session.exec(select(Article)).all()
+        if article.id != target.id and _normalize_article_url(article.url) == normalized_target
+    ]
+    moved_images = 0
+    moved_bootstrap_links = 0
+    removed_articles = 0
+    now = datetime.now(timezone.utc)
+
+    target.url = normalized_target
+    target.domain = urlparse(normalized_target).netloc.lower()
+    for duplicate in duplicates:
+        if (not target.title or target.title == "Teste direto de imagem") and duplicate.title and duplicate.title != "Teste direto de imagem":
+            target.title = duplicate.title
+        for image in session.exec(select(ArticleImage).where(ArticleImage.article_id == duplicate.id)).all():
+            image.article_id = target.id
+            session.add(image)
+            moved_images += 1
+        for item in session.exec(select(BootstrapRunArticle).where(BootstrapRunArticle.article_id == duplicate.id)).all():
+            item.article_id = target.id
+            item.updated_at = now
+            session.add(item)
+            moved_bootstrap_links += 1
+        session.delete(duplicate)
+        removed_articles += 1
+
+    session.add(target)
+    return {
+        "removed_articles": removed_articles,
+        "moved_images": moved_images,
+        "moved_bootstrap_links": moved_bootstrap_links,
+        "normalized_url": normalized_target,
+    }
+
+
 @router.post("/login", response_model=LoginOut)
 def login(payload: LoginIn):
     settings = get_settings()
@@ -1365,6 +1403,31 @@ def delete_admin_article(
     )
     session.commit()
     return {"ok": True, "deleted": deleted}
+
+
+@router.post("/articles/{article_id}/merge-duplicates")
+def merge_admin_article_duplicates(
+    article_id: str,
+    session: Session = Depends(get_session),
+    _: bool = Depends(_require_admin),
+):
+    article = session.get(Article, _as_uuid(article_id))
+    if not article:
+        raise HTTPException(status_code=404, detail="Matéria não encontrada")
+
+    merged = _merge_duplicate_articles(session, article)
+    write_action(
+        session,
+        actor_type="admin",
+        actor_id="system",
+        action="merge_duplicate_articles",
+        entity_type="article",
+        entity_id=article.id,
+        metadata=merged,
+    )
+    session.commit()
+    session.refresh(article)
+    return {"ok": True, "article": _article_admin_payload(session, article), "merged": merged}
 
 
 @router.get("/suggestions")
